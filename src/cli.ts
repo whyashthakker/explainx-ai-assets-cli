@@ -10,6 +10,9 @@ import { addMcpUrl, MCP_TARGETS } from "./mcp.js";
 import { PROMPT_TARGET_NAMES } from "./prompts.js";
 import { AGENT_TARGET_NAMES } from "./agent-assets.js";
 import { installContextPacks, installTemplates } from "./simple-assets.js";
+import { approveVaultAsset, auditVaultAsset, initVault, interactiveConnectVault, listVaults, publishToVault, syncVault, vaultStatus } from "./vault.js";
+import { connectVault } from "./vault-config.js";
+import type { VaultProviderKind } from "./vault-types.js";
 
 printBanner();
 
@@ -211,6 +214,78 @@ mcp.command("add")
     if (destinations.length === 0) { console.log("Installation cancelled."); return; }
     console.log(`\n✔ Installed MCP server in ${destinations.length} configuration${destinations.length === 1 ? "" : "s"}`);
     for (const destination of destinations) console.log(`  → ${destination}`);
+  });
+
+const vault = program.command("vault").description("Manage private, audited AI asset vaults");
+
+vault.command("init")
+  .description("Create an EPX vault in an empty directory")
+  .argument("[directory]", "vault directory", process.cwd())
+  .option("-n, --name <name>", "vault name")
+  .action(async (directory: string, options: { name?: string }) => console.log(`✔ Created vault at ${await initVault(directory, options.name)}`));
+
+vault.command("connect")
+  .description("Connect a Git, synchronized-folder, or MCP vault")
+  .argument("[name]", "local vault name")
+  .argument("[location]", "Git URL, folder path, or MCP URL")
+  .option("-p, --provider <provider>", "git, folder, or mcp")
+  .action(async (name: string | undefined, location: string | undefined, options: { provider?: string }) => {
+    if (!name && !location) { const result = await interactiveConnectVault(); console.log(`✔ Connected ${result.name} (${result.provider})`); return; }
+    if (!name || !location) throw new Error("connect requires both <name> and <location>");
+    const inferred = options.provider ?? (/^https?:\/\/.+\/mcp(?:\/)?$/i.test(location) ? "mcp" : /^(?:git@|ssh:\/\/)|\.git$/i.test(location) ? "git" : "folder");
+    if (!["git", "folder", "mcp"].includes(inferred)) throw new Error("provider must be git, folder, or mcp");
+    const result = await connectVault(name, inferred as VaultProviderKind, location); console.log(`✔ Connected ${result.name} (${result.provider})`);
+  });
+
+vault.command("list").alias("ls").description("List connected vaults").action(async () => {
+  const connections = await listVaults(); if (!connections.length) { console.log("No vaults connected."); return; }
+  for (const item of connections) console.log(`${item.name}\t${item.provider}\t${item.location}`);
+});
+
+vault.command("publish")
+  .description("Audit and publish a package for reviewer approval")
+  .argument("<source>", "local EPX package directory")
+  .requiredOption("--vault <name>", "connected vault")
+  .option("--publisher <identity>", "publisher identity")
+  .option("--allow-risk", "allow publishing high-risk content; sync policy can still block it")
+  .action(async (source: string, options: { vault: string; publisher?: string; allowRisk?: boolean }) => {
+    const result = await publishToVault(source, options); console.log(`✔ Published ${result.name}\n  digest: ${result.digest}\n  risk: ${result.report.summary.highestRisk}\n  status: pending approval`);
+  });
+
+vault.command("approve")
+  .description("Sign approval for an exact asset digest")
+  .argument("<asset>", "asset name")
+  .requiredOption("--vault <name>", "connected vault")
+  .requiredOption("--reviewer <identity>", "reviewer identity from vault policy")
+  .requiredOption("--key <path>", "SSH private key used to sign")
+  .action(async (asset: string, options: { vault: string; reviewer: string; key: string }) => {
+    const approval = await approveVaultAsset(options.vault, asset, options.reviewer, options.key); console.log(`✔ Approved ${asset}\n  digest: ${approval.digest}\n  reviewer: ${approval.reviewer}`);
+  });
+
+vault.command("audit")
+  .description("Audit an asset held in a connected vault")
+  .argument("<asset>", "asset name")
+  .requiredOption("--vault <name>", "connected vault")
+  .option("--json", "output JSON")
+  .action(async (asset: string, options: { vault: string; json?: boolean }) => {
+    const report = await auditVaultAsset(options.vault, asset); console.log(options.json ? JSON.stringify(report, null, 2) : `Audited ${report.summary.filesScanned} files — highest risk: ${report.summary.highestRisk}`);
+  });
+
+vault.command("status")
+  .description("Show vault revision and approval state")
+  .argument("<name>", "connected vault")
+  .action(async (name: string) => {
+    const result = await vaultStatus(name); console.log(`${result.connection.name} (${result.connection.provider}) revision ${result.revision}`);
+    for (const asset of result.assets) console.log(`${asset.name}\t${asset.status}\t${asset.risk}`);
+  });
+
+vault.command("sync")
+  .description("Install approved vault assets into the canonical EPX registry")
+  .argument("<name>", "connected vault")
+  .option("--dry-run", "show eligible assets without writing")
+  .action(async (name: string, options: { dryRun?: boolean }) => {
+    const result = await syncVault(name, options.dryRun); const prefix = options.dryRun ? "Would install" : "Installed";
+    console.log(`${prefix}: ${result.installed.join(", ") || "none"}`); if (result.pending.length) console.log(`Pending or blocked: ${result.pending.join(", ")}`);
   });
 
 program.command("remove")

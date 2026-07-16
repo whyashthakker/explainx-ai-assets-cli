@@ -11,6 +11,12 @@ export interface InstalledPackage {
   source: string;
   installedAt: string;
   ref?: string;
+  vault?: string;
+  vaultProvider?: "git" | "folder" | "mcp";
+  digest?: string;
+  approvedDigest?: string;
+  installedTargets?: string[];
+  installedScope?: "project" | "global";
 }
 
 export interface Registry {

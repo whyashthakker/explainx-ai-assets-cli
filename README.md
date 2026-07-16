@@ -158,6 +158,31 @@ targets:
 
 Updates use the repository's latest GitHub release, falling back to its newest tag. The release/tag must contain an `epx.yaml` whose version is newer than the installed version.
 
+## Private team vaults
+
+EPX vaults distribute reviewed assets through private Git repositories, synchronized Google Drive, iCloud Drive, Dropbox or OneDrive folders, generic local/network folders, and compatible MCP servers. Existing standalone installs remain independent.
+
+```bash
+# Create and connect a synchronized-folder vault
+epx vault init "/path/to/Google Drive/Team EPX Vault" --name team
+epx vault connect team "/path/to/Google Drive/Team EPX Vault" --provider folder
+
+# Or connect Git and MCP providers
+epx vault connect company git@github.com:company/ai-vault.git --provider git
+epx vault connect remote https://vault.company.com/mcp --provider mcp
+
+# Publish, review, and explicitly synchronize
+epx vault publish ./postgres-review --vault team --publisher author@example.com
+epx vault approve postgres-review --vault team --reviewer security@example.com --key ~/.ssh/id_ed25519
+epx vault status team
+epx vault sync team --dry-run
+epx vault sync team
+```
+
+Run `epx vault connect` without arguments to discover supported desktop-synchronized cloud folders interactively. Cloud-provider credentials remain with their desktop clients; Git uses the system Git/SSH credential stack. The MCP adapter implements `vault_get_snapshot` and `vault_put_snapshot` tools. For a private MCP vault named `remote`, provide `EPX_VAULT_TOKEN_REMOTE` in the environment; tokens are never written to the shared vault or EPX configuration.
+
+Every publication is validated, audited, and hashed. Edit `epx-vault.yaml` to register named reviewers and their SSH public keys. Approvals are signed, apply to one exact digest, and cannot be issued by the publisher when self-approval protection is enabled. High and critical assets are blocked by default. Sync installs only approved assets and refuses to overwrite native agent destinations changed since the previous vault sync.
+
 ## Security audit
 
 Audit every Markdown file under `skills/`, `rules/`, and `commands/` using the same heuristic risk categories as the explainx.ai skill scanner:

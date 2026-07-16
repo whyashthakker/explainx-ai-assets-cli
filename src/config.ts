@@ -14,3 +14,11 @@ export function getPackagesDirectory(): string {
 export function getRegistryPath(): string {
   return path.join(getEpxHome(), "registry.json");
 }
+
+export function getVaultConfigPath(): string {
+  return path.join(getEpxHome(), "vaults.json");
+}
+
+export function getVaultCacheDirectory(): string {
+  return path.join(getEpxHome(), "vaults");
+}
