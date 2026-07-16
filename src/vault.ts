@@ -5,9 +5,9 @@ import fs from "fs-extra";
 import YAML from "yaml";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { input, select } from "@inquirer/prompts";
+import { confirm, input, select } from "@inquirer/prompts";
 import { auditPackage, severityWeight, type AuditReport } from "./audit.js";
-import { getPackagesDirectory } from "./config.js";
+import { getEpxHome, getPackagesDirectory } from "./config.js";
 import { connectVault, getVaultConnection, readVaultConnections } from "./vault-config.js";
 import { providerFor } from "./vault-providers.js";
 import { validatePackage } from "./manifest.js";
@@ -18,6 +18,8 @@ import { installRuleToAgents, supportsRules } from "./rules.js";
 import { installPrompts, supportsPromptTarget } from "./prompts.js";
 import { installAgentAssets, supportsAgentTarget } from "./agent-assets.js";
 import type { VaultApproval, VaultConnection, VaultLock, VaultManifest, VaultPolicy, VaultProviderKind } from "./vault-types.js";
+import { readProfile } from "./profile.js";
+import { installPackage, type InstallOptions } from "./install.js";
 
 const exec = promisify(execFile);
 const DEFAULT_POLICY: VaultPolicy = { reviewers: [], approvalsRequired: 1, blockSeverities: ["high", "critical"], preventSelfApproval: true };
@@ -38,7 +40,8 @@ export async function initVault(directory: string, name = path.basename(path.res
   const root = path.resolve(directory);
   await fs.ensureDir(root);
   if ((await fs.readdir(root)).length > 0) throw new Error("vault directory must be empty");
-  const manifest: VaultManifest = { schemaVersion: 1, name, policy: DEFAULT_POLICY };
+  const profile = await readProfile();
+  const manifest: VaultManifest = { schemaVersion: 1, name, policy: DEFAULT_POLICY, ...(profile ? { members: [{ id: profile.id, name: profile.name, email: profile.email, roles: ["owner", "publisher"] }] } : {}) };
   const lock: VaultLock = { schemaVersion: 1, revision: 0, assets: {} };
   await fs.ensureDir(path.join(root, "assets")); await fs.ensureDir(path.join(root, "approvals"));
   await fs.writeFile(manifestPath(root), YAML.stringify(manifest)); await fs.writeJson(lockPath(root), lock, { spaces: 2 });
@@ -67,31 +70,52 @@ async function copyAssetAtomically(source: string, destination: string): Promise
   await fs.remove(destination); await fs.move(staging, destination);
 }
 
-function publisherIdentity(): string {
-  return process.env.EPX_IDENTITY || process.env.GIT_AUTHOR_EMAIL || process.env.USER || os.userInfo().username;
-}
-
-export interface PublishOptions { vault: string; allowRisk?: boolean; publisher?: string }
+export interface PublishOptions { vault: string; blockRisk?: boolean; allowRisk?: boolean; publisher?: string }
 export async function publishToVault(source: string, options: PublishOptions): Promise<{ name: string; digest: string; report: AuditReport }> {
   const connection = await getVaultConnection(options.vault); const provider = providerFor(connection);
   const remoteRoot = await provider.prepare(connection); const { lock } = await readVault(remoteRoot);
   const sourceRoot = path.resolve(source); if (!(await fs.pathExists(sourceRoot))) throw new Error(`asset directory does not exist: ${source}`);
   const validation = await validatePackage(sourceRoot); const report = await auditPackage(sourceRoot);
-  if (!options.allowRisk && severityWeight[report.summary.highestRisk] >= severityWeight.high && ["high", "critical"].includes(report.summary.highestRisk)) {
+  if (options.blockRisk && severityWeight[report.summary.highestRisk] >= severityWeight.high && ["high", "critical"].includes(report.summary.highestRisk)) {
     throw new Error(`publication blocked: audit risk is ${report.summary.highestRisk}; review findings before publishing`);
   }
+  const profile = options.publisher ? undefined : await readProfile();
+  if (!options.publisher && !profile) throw new Error("EPX profile is not configured; run 'epx profile set' first");
   const digest = await digestDirectory(sourceRoot); const staging = await fs.mkdtemp(path.join(os.tmpdir(), "epx-vault-publish-"));
   try {
     await fs.copy(remoteRoot, staging, { filter: (file) => path.basename(file) !== ".git" });
+    if (profile) {
+      const stagedManifest = YAML.parse(await fs.readFile(manifestPath(staging), "utf8")) as VaultManifest;
+      const members = stagedManifest.members ?? [];
+      if (!members.some((member) => member.id === profile.id)) members.push({ id: profile.id, name: profile.name, email: profile.email, roles: ["publisher"] });
+      stagedManifest.members = members; await fs.writeFile(manifestPath(staging), YAML.stringify(stagedManifest));
+    }
     await copyAssetAtomically(sourceRoot, path.join(staging, "assets", validation.manifest.name));
     await fs.remove(path.join(staging, "approvals", validation.manifest.name));
     const next: VaultLock = { ...lock, revision: lock.revision + 1, assets: { ...lock.assets, [validation.manifest.name]: {
       name: validation.manifest.name, version: validation.manifest.version, type: validation.manifest.type, digest,
-      publisher: options.publisher ?? publisherIdentity(), publishedAt: new Date().toISOString(), auditRisk: report.summary.highestRisk
+      publisher: options.publisher ?? profile!.id, publishedAt: new Date().toISOString(), auditRisk: report.summary.highestRisk
     } } };
     await fs.writeJson(lockPath(staging), next, { spaces: 2 }); await provider.publish(connection, staging, lock.revision);
   } finally { await fs.remove(staging); }
   return { name: validation.manifest.name, digest, report };
+}
+
+export interface VaultAddHooks { downloaded?: () => void; validated?: () => void; publishing?: () => void }
+export async function addSourceToVault(source: string, options: PublishOptions, installOptions: InstallOptions = {}, hooks: VaultAddHooks = {}): Promise<{ name: string; digest: string; report: AuditReport }> {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "epx-vault-source-"));
+  const previousHome = process.env.EPX_HOME;
+  try {
+    process.env.EPX_HOME = path.join(temporary, "epx-home");
+    const installed = await installPackage(source, undefined, { downloaded: hooks.downloaded, validated: hooks.validated }, installOptions);
+    const packageRoot = path.join(process.env.EPX_HOME, "packages", installed.name);
+    if (previousHome === undefined) delete process.env.EPX_HOME; else process.env.EPX_HOME = previousHome;
+    hooks.publishing?.();
+    return await publishToVault(packageRoot, options);
+  } finally {
+    if (previousHome === undefined) delete process.env.EPX_HOME; else process.env.EPX_HOME = previousHome;
+    await fs.remove(temporary);
+  }
 }
 
 function approvalPayload(asset: string, digest: string, reviewer: string): string { return `epx-vault-approval-v1\n${asset}\n${digest}\n${reviewer}\n`; }
@@ -118,11 +142,11 @@ async function verifyApproval(approval: VaultApproval, policy: VaultPolicy): Pro
   } catch { return false; } finally { await fs.remove(temporary); }
 }
 
-export async function approveVaultAsset(vaultName: string, asset: string, reviewer: string, privateKey: string): Promise<VaultApproval> {
+export async function approveVaultAsset(vaultName: string, asset: string, reviewer: string, privateKey: string, allowSelfApproval = false): Promise<VaultApproval> {
   const connection = await getVaultConnection(vaultName); const provider = providerFor(connection); const root = await provider.prepare(connection);
   const { manifest, lock } = await readVault(root); const entry = lock.assets[asset]; if (!entry) throw new Error(`asset '${asset}' is not in vault '${vaultName}'`);
   if (!manifest.policy.reviewers.some((item) => item.id === reviewer)) throw new Error(`'${reviewer}' is not a named vault reviewer`);
-  if (manifest.policy.preventSelfApproval && entry.publisher === reviewer) throw new Error("publishers cannot approve their own asset version");
+  if (manifest.policy.preventSelfApproval && entry.publisher === reviewer && !allowSelfApproval) throw new Error("publishers cannot approve their own asset version");
   const approval: VaultApproval = { schemaVersion: 1, asset, digest: entry.digest, reviewer, approvedAt: new Date().toISOString(), signature: await sshSign(approvalPayload(asset, entry.digest, reviewer), path.resolve(privateKey.replace(/^~(?=$|\/)/, os.homedir()))) };
   const staging = await fs.mkdtemp(path.join(os.tmpdir(), "epx-vault-approve-"));
   try {
@@ -131,6 +155,44 @@ export async function approveVaultAsset(vaultName: string, asset: string, review
     const next = { ...lock, revision: lock.revision + 1 }; await fs.writeJson(lockPath(staging), next, { spaces: 2 }); await provider.publish(connection, staging, lock.revision);
   } finally { await fs.remove(staging); }
   return approval;
+}
+
+export async function localApprovalContext(vaultName: string, asset: string): Promise<{ selfPublished: boolean; risk: string }> {
+  const profile = await readProfile(); if (!profile) throw new Error("EPX profile is not configured; run 'epx profile set' first");
+  const connection = await getVaultConnection(vaultName); const root = await providerFor(connection).prepare(connection); const { lock } = await readVault(root);
+  const entry = lock.assets[asset]; if (!entry) throw new Error(`asset '${asset}' is not in vault '${vaultName}'`);
+  return { selfPublished: entry.publisher === profile.id, risk: entry.auditRisk };
+}
+
+export async function approveWithLocalProfile(vaultName: string, asset: string, allowSelfApproval = false): Promise<{ approval: VaultApproval; selfApproved: boolean }> {
+  const profile = await readProfile(); if (!profile) throw new Error("EPX profile is not configured; run 'epx profile set' first");
+  const keyDirectory = path.join(getEpxHome(), "keys"); const privateKey = path.join(keyDirectory, "vault-reviewer-ed25519");
+  await fs.ensureDir(keyDirectory);
+  if (!(await fs.pathExists(privateKey))) {
+    try { await exec("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `epx:${profile.email}`, "-f", privateKey]); }
+    catch (error) { throw new Error(`could not create the local approval key: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  const publicKey = (await fs.readFile(`${privateKey}.pub`, "utf8")).trim();
+  const connection = await getVaultConnection(vaultName); const provider = providerFor(connection); const root = await provider.prepare(connection); const { manifest, lock } = await readVault(root);
+  const entry = lock.assets[asset]; if (!entry) throw new Error(`asset '${asset}' is not in vault '${vaultName}'`);
+  if (!manifest.policy.reviewers.some((reviewer) => reviewer.id === profile.id)) {
+    const staging = await fs.mkdtemp(path.join(os.tmpdir(), "epx-vault-reviewer-"));
+    try {
+      await fs.copy(root, staging, { filter: (file) => path.basename(file) !== ".git" });
+      const stagedManifest = YAML.parse(await fs.readFile(manifestPath(staging), "utf8")) as VaultManifest;
+      stagedManifest.policy.reviewers.push({ id: profile.id, publicKey });
+      const members = stagedManifest.members ?? [];
+      if (!members.some((member) => member.id === profile.id)) members.push({ id: profile.id, name: profile.name, email: profile.email, roles: ["owner", "publisher", "reviewer"] });
+      else for (const member of members) if (member.id === profile.id) {
+        if (!member.roles.includes("reviewer")) member.roles.push("reviewer");
+        if (!member.roles.includes("owner")) member.roles.push("owner");
+      }
+      stagedManifest.members = members; await fs.writeFile(manifestPath(staging), YAML.stringify(stagedManifest));
+      await fs.writeJson(lockPath(staging), { ...lock, revision: lock.revision + 1 }, { spaces: 2 }); await provider.publish(connection, staging, lock.revision);
+    } finally { await fs.remove(staging); }
+  }
+  const selfApproved = entry.publisher === profile.id;
+  return { approval: await approveVaultAsset(vaultName, asset, profile.id, privateKey, allowSelfApproval), selfApproved };
 }
 
 async function validApprovals(root: string, manifest: VaultManifest, asset: string, digest: string): Promise<VaultApproval[]> {
@@ -206,14 +268,67 @@ export async function detectCloudFolders(home = os.homedir(), platform = process
     for (const name of await fs.readdir(parent)) if (pattern.test(name) && (await fs.stat(path.join(parent, name))).isDirectory()) candidates.push({ service, path: path.join(parent, name) });
   };
   if (platform === "darwin") {
-    await addMatches("Google Drive", path.join(home, "Library/CloudStorage"), /^GoogleDrive-/i); await addMatches("Dropbox", path.join(home, "Library/CloudStorage"), /^Dropbox/i); await addMatches("OneDrive", path.join(home, "Library/CloudStorage"), /^OneDrive/i);
+    const cloudStorage = path.join(home, "Library/CloudStorage");
+    if (await fs.pathExists(cloudStorage)) {
+      for (const account of await fs.readdir(cloudStorage)) {
+        if (!/^GoogleDrive-/i.test(account)) continue;
+        const accountRoot = path.join(cloudStorage, account); const myDrive = path.join(accountRoot, "My Drive");
+        if (await fs.pathExists(myDrive) && (await fs.stat(myDrive)).isDirectory()) candidates.push({ service: "Google Drive", path: myDrive });
+      }
+    }
+    await addMatches("Dropbox", cloudStorage, /^Dropbox/i); await addMatches("OneDrive", cloudStorage, /^OneDrive/i);
     const icloud = path.join(home, "Library/Mobile Documents/com~apple~CloudDocs"); if (await fs.pathExists(icloud)) candidates.push({ service: "iCloud Drive", path: icloud });
+    const legacyDropbox = path.join(home, "Dropbox"); if (await fs.pathExists(legacyDropbox)) candidates.push({ service: "Dropbox", path: legacyDropbox });
   } else if (platform === "win32") {
     for (const [service, variable] of [["Google Drive", "GoogleDrive"], ["Dropbox", "Dropbox"], ["OneDrive", "OneDrive"]] as const) if (process.env[variable] && await fs.pathExists(process.env[variable]!)) candidates.push({ service, path: process.env[variable]! });
+    for (const [service, folder] of [["Dropbox", "Dropbox"], ["Google Drive", "Google Drive"]] as const) { const candidate = path.join(home, folder); if (await fs.pathExists(candidate) && !candidates.some((item) => item.path === candidate)) candidates.push({ service, path: candidate }); }
   } else {
     for (const [service, folder] of [["Google Drive", "Google Drive"], ["Dropbox", "Dropbox"], ["OneDrive", "OneDrive"]] as const) { const candidate = path.join(home, folder); if (await fs.pathExists(candidate)) candidates.push({ service, path: candidate }); }
   }
   return candidates;
+}
+
+export type CloudVaultChoice = CloudFolder["service"] | "Local/network folder";
+const CLOUD_DOWNLOADS: Partial<Record<CloudVaultChoice, string>> = {
+  "Dropbox": "https://www.dropbox.com/install",
+  "Google Drive": "https://ipv4.google.com/intl/en_zm/drive/download/",
+  "OneDrive": "https://www.microsoft.com/microsoft-365/onedrive/download",
+  "iCloud Drive": "https://support.apple.com/icloud"
+};
+
+async function openExternal(url: string): Promise<void> {
+  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+  try { await exec(command, args); } catch { console.log(`Open this page to install the client:\n${url}`); }
+}
+
+export async function setupCloudFolderVault(name: string, preferred?: CloudVaultChoice, initialize = false): Promise<VaultConnection> {
+  const service = preferred ?? await select<CloudVaultChoice>({ message: "Which synchronized storage do you want to use?", choices: [
+    { name: "Dropbox", value: "Dropbox" }, { name: "Google Drive", value: "Google Drive" }, { name: "OneDrive", value: "OneDrive" }, { name: "iCloud Drive", value: "iCloud Drive" }, { name: "Local or network folder", value: "Local/network folder" }
+  ] });
+  let root: string;
+  if (service === "Local/network folder") root = path.resolve((await input({ message: "Folder path" })).replace(/^~(?=$|\/)/, os.homedir()));
+  else {
+    const folders = (await detectCloudFolders()).filter((folder) => folder.service === service);
+    if (!folders.length) {
+      const url = CLOUD_DOWNLOADS[service]!;
+      const shouldOpen = await confirm({ message: `${service} is not installed or signed in. Open its official installation page?`, default: true });
+      if (shouldOpen) await openExternal(url);
+      throw new Error(`${service} client was not detected; install it, sign in, and run this command again`);
+    }
+    root = folders.length === 1 ? folders[0].path : await select({ message: `Which ${service} account folder?`, choices: folders.map((folder) => ({ name: folder.path, value: folder.path })) });
+  }
+  const directManifest = path.join(root, "epx-vault.yaml");
+  const location = await fs.pathExists(directManifest) ? root : path.join(root, "EPX-Vaults", name);
+  const exists = await fs.pathExists(path.join(location, "epx-vault.yaml"));
+  const proceed = await confirm({ message: `${initialize ? "Create" : exists ? "Connect" : "Create and connect"} vault '${name}' at ${location}?`, default: true });
+  if (!proceed) throw new Error("vault setup cancelled");
+  if (initialize && exists) throw new Error(`a vault already exists at ${location}`);
+  if (!exists) {
+    if (!initialize && !await confirm({ message: "No EPX vault exists there. Initialize it now?", default: true })) throw new Error("selected folder is not an EPX vault");
+    await initVault(location, name);
+  }
+  return connectVault(name, "folder", location);
 }
 
 export async function interactiveConnectVault(): Promise<VaultConnection> {

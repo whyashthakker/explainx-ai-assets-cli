@@ -21,6 +21,7 @@ export interface VaultManifest {
   schemaVersion: 1;
   name: string;
   policy: VaultPolicy;
+  members?: Array<{ id: string; name: string; email: string; roles: string[] }>;
 }
 
 export interface VaultLockAsset {

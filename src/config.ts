@@ -22,3 +22,7 @@ export function getVaultConfigPath(): string {
 export function getVaultCacheDirectory(): string {
   return path.join(getEpxHome(), "vaults");
 }
+
+export function getProfilePath(): string {
+  return path.join(getEpxHome(), "profile.json");
+}

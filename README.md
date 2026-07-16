@@ -163,7 +163,14 @@ Updates use the repository's latest GitHub release, falling back to its newest t
 EPX vaults distribute reviewed assets through private Git repositories, synchronized Google Drive, iCloud Drive, Dropbox or OneDrive folders, generic local/network folders, and compatible MCP servers. Existing standalone installs remain independent.
 
 ```bash
-# Create and connect a synchronized-folder vault
+# Detect Dropbox, confirm its folder, then create and connect the vault
+epx init vault team --dropbox
+
+# Or choose Dropbox, Google Drive, OneDrive, iCloud, or a local folder interactively
+epx init vault team
+epx vault connect team
+
+# Explicit paths remain supported
 epx vault init "/path/to/Google Drive/Team EPX Vault" --name team
 epx vault connect team "/path/to/Google Drive/Team EPX Vault" --provider folder
 
@@ -171,17 +178,21 @@ epx vault connect team "/path/to/Google Drive/Team EPX Vault" --provider folder
 epx vault connect company git@github.com:company/ai-vault.git --provider git
 epx vault connect remote https://vault.company.com/mcp --provider mcp
 
+
 # Publish, review, and explicitly synchronize
-epx vault publish ./postgres-review --vault team --publisher author@example.com
-epx vault approve postgres-review --vault team --reviewer security@example.com --key ~/.ssh/id_ed25519
+epx vault publish ./postgres-review --vault team
+epx vault add JuliusBrussee/caveman --vault team
+epx vault approve postgres-review --vault team
 epx vault status team
 epx vault sync team --dry-run
 epx vault sync team
 ```
 
-Run `epx vault connect` without arguments to discover supported desktop-synchronized cloud folders interactively. Cloud-provider credentials remain with their desktop clients; Git uses the system Git/SSH credential stack. The MCP adapter implements `vault_get_snapshot` and `vault_put_snapshot` tools. For a private MCP vault named `remote`, provide `EPX_VAULT_TOKEN_REMOTE` in the environment; tokens are never written to the shared vault or EPX configuration.
+Run `epx init vault <name>` or `epx vault connect <name>` to choose a synchronized storage provider with the arrow keys. EPX detects installed account folders and asks for confirmation before creating or connecting the exact path. If a selected client is missing, EPX can open its official installation page after confirmation; the user installs it and signs in before retrying. Cloud credentials remain with desktop clients. Git uses the system Git/SSH credential stack. The MCP adapter implements `vault_get_snapshot` and `vault_put_snapshot` tools. For a private MCP vault named `remote`, provide `EPX_VAULT_TOKEN_REMOTE` in the environment; tokens are never written to the shared vault or EPX configuration.
 
-Every publication is validated, audited, and hashed. Edit `epx-vault.yaml` to register named reviewers and their SSH public keys. Approvals are signed, apply to one exact digest, and cannot be issued by the publisher when self-approval protection is enabled. High and critical assets are blocked by default. Sync installs only approved assets and refuses to overwrite native agent destinations changed since the previous vault sync.
+Every publication is validated, audited, hashed, and stored with its heuristic risk result. Use `--block-risk` when strict ingestion is desired. Edit `epx-vault.yaml` to register named reviewers and their SSH public keys. Approvals are signed, apply to one exact digest, and cannot be issued by the publisher when self-approval protection is enabled. High and critical assets remain blocked from installation by default vault policy. Sync installs only approved assets and refuses to overwrite native agent destinations changed since the previous vault sync.
+
+The first vault creation asks once for a name and email, saves the local profile at `~/.epx/profile.json` with user-only permissions, and writes its SHA-256 identity plus name/email into the new vault member list. Later publications reuse the identity automatically. Inspect or change it with `epx profile show` and `epx profile set --name "Name" --email name@example.com`.
 
 ## Security audit
 

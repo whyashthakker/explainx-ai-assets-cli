@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { Command } from "commander";
+import { confirm } from "@inquirer/prompts";
 import { addCommand, auditCommand, listCommand, removeCommand, updateCommand, validateCommand } from "./commands.js";
 import type { AuditSeverity } from "./audit.js";
 import { ADDITIONAL_AGENT_NAMES, AGENTS, type AgentName, type InstallScope } from "./agents.js";
@@ -10,9 +11,10 @@ import { addMcpUrl, MCP_TARGETS } from "./mcp.js";
 import { PROMPT_TARGET_NAMES } from "./prompts.js";
 import { AGENT_TARGET_NAMES } from "./agent-assets.js";
 import { installContextPacks, installTemplates } from "./simple-assets.js";
-import { approveVaultAsset, auditVaultAsset, initVault, interactiveConnectVault, listVaults, publishToVault, syncVault, vaultStatus } from "./vault.js";
+import { addSourceToVault, approveVaultAsset, approveWithLocalProfile, auditVaultAsset, initVault, interactiveConnectVault, listVaults, localApprovalContext, publishToVault, setupCloudFolderVault, syncVault, vaultStatus, type CloudVaultChoice } from "./vault.js";
 import { connectVault } from "./vault-config.js";
 import type { VaultProviderKind } from "./vault-types.js";
+import { ensureProfile, readProfile, saveProfile } from "./profile.js";
 
 printBanner();
 
@@ -218,11 +220,47 @@ mcp.command("add")
 
 const vault = program.command("vault").description("Manage private, audited AI asset vaults");
 
+const profile = program.command("profile").description("Manage the local EPX identity");
+profile.command("set")
+  .description("Create or update the local profile")
+  .requiredOption("--name <name>", "display name")
+  .requiredOption("--email <email>", "email address")
+  .action(async (options: { name: string; email: string }) => { const saved = await saveProfile(options.name, options.email); console.log(`✔ Saved EPX profile for ${saved.name} <${saved.email}>`); });
+profile.command("show").description("Show the local profile").action(async () => {
+  const saved = await readProfile(); if (!saved) { console.log("No EPX profile configured."); return; }
+  console.log(`${saved.name} <${saved.email}>\nID: ${saved.id}`);
+});
+
+interface CloudInitOptions { dropbox?: boolean; googleDrive?: boolean; onedrive?: boolean; icloud?: boolean; local?: boolean }
+function selectedCloud(options: CloudInitOptions): CloudVaultChoice | undefined {
+  const selected: CloudVaultChoice[] = [
+    ...(options.dropbox ? ["Dropbox" as const] : []), ...(options.googleDrive ? ["Google Drive" as const] : []),
+    ...(options.onedrive ? ["OneDrive" as const] : []), ...(options.icloud ? ["iCloud Drive" as const] : []),
+    ...(options.local ? ["Local/network folder" as const] : [])
+  ];
+  if (selected.length > 1) throw new Error("choose only one cloud provider flag");
+  return selected[0];
+}
+
+const init = program.command("init").description("Initialize EPX resources");
+init.command("vault")
+  .description("Create and connect a synchronized-folder vault")
+  .argument("<name>", "vault name")
+  .option("--dropbox", "use the locally synchronized Dropbox client")
+  .option("--google-drive", "use the locally synchronized Google Drive client")
+  .option("--onedrive", "use the locally synchronized OneDrive client")
+  .option("--icloud", "use the locally synchronized iCloud Drive folder")
+  .option("--local", "use a local or network folder")
+  .action(async (name: string, options: CloudInitOptions) => {
+    await ensureProfile();
+    const result = await setupCloudFolderVault(name, selectedCloud(options), true); console.log(`✔ Created and connected ${result.name}\n  → ${result.location}`);
+  });
+
 vault.command("init")
   .description("Create an EPX vault in an empty directory")
   .argument("[directory]", "vault directory", process.cwd())
   .option("-n, --name <name>", "vault name")
-  .action(async (directory: string, options: { name?: string }) => console.log(`✔ Created vault at ${await initVault(directory, options.name)}`));
+  .action(async (directory: string, options: { name?: string }) => { await ensureProfile(); console.log(`✔ Created vault at ${await initVault(directory, options.name)}`); });
 
 vault.command("connect")
   .description("Connect a Git, synchronized-folder, or MCP vault")
@@ -231,6 +269,7 @@ vault.command("connect")
   .option("-p, --provider <provider>", "git, folder, or mcp")
   .action(async (name: string | undefined, location: string | undefined, options: { provider?: string }) => {
     if (!name && !location) { const result = await interactiveConnectVault(); console.log(`✔ Connected ${result.name} (${result.provider})`); return; }
+    if (name && !location && !options.provider) { const result = await setupCloudFolderVault(name); console.log(`✔ Connected ${result.name}\n  → ${result.location}`); return; }
     if (!name || !location) throw new Error("connect requires both <name> and <location>");
     const inferred = options.provider ?? (/^https?:\/\/.+\/mcp(?:\/)?$/i.test(location) ? "mcp" : /^(?:git@|ssh:\/\/)|\.git$/i.test(location) ? "git" : "folder");
     if (!["git", "folder", "mcp"].includes(inferred)) throw new Error("provider must be git, folder, or mcp");
@@ -242,13 +281,33 @@ vault.command("list").alias("ls").description("List connected vaults").action(as
   for (const item of connections) console.log(`${item.name}\t${item.provider}\t${item.location}`);
 });
 
+vault.command("add")
+  .description("Download an AI asset directly into a vault without installing it locally")
+  .argument("<owner/repo>", "GitHub repository")
+  .requiredOption("--vault <name>", "connected vault")
+  .option("--skill <name>", "skill name for repositories containing multiple skills")
+  .option("--rule <name>", "rule name")
+  .option("--command <name>", "command name")
+  .option("--prompt <name>", "prompt name")
+  .option("--agent <name>", "custom agent name")
+  .option("--block-risk", "reject high or critical heuristic findings during publication")
+  .action(async (source: string, options: { vault: string; skill?: string; rule?: string; command?: string; prompt?: string; agent?: string; blockRisk?: boolean }) => {
+    await ensureProfile();
+    console.log(`◇ Downloading ${source}`);
+    const result = await addSourceToVault(source, { vault: options.vault, blockRisk: options.blockRisk }, {
+      skill: options.skill, rule: options.rule, ruleAsset: Boolean(options.rule), command: options.command, prompt: options.prompt,
+      assetType: options.prompt ? "prompt" : options.command ? "command" : undefined, agent: options.agent, agentAsset: Boolean(options.agent)
+    }, { downloaded: () => console.log("✔ Downloaded"), validated: () => console.log("✔ Package validated"), publishing: () => console.log("◇ Auditing and publishing to vault") });
+    console.log(`✔ Added ${result.name} directly to vault '${options.vault}'\n  digest: ${result.digest}\n  risk: ${result.report.summary.highestRisk}\n  status: pending approval`);
+  });
+
 vault.command("publish")
   .description("Audit and publish a package for reviewer approval")
   .argument("<source>", "local EPX package directory")
   .requiredOption("--vault <name>", "connected vault")
-  .option("--publisher <identity>", "publisher identity")
-  .option("--allow-risk", "allow publishing high-risk content; sync policy can still block it")
-  .action(async (source: string, options: { vault: string; publisher?: string; allowRisk?: boolean }) => {
+  .option("--block-risk", "reject high or critical heuristic findings during publication")
+  .action(async (source: string, options: { vault: string; blockRisk?: boolean }) => {
+    await ensureProfile();
     const result = await publishToVault(source, options); console.log(`✔ Published ${result.name}\n  digest: ${result.digest}\n  risk: ${result.report.summary.highestRisk}\n  status: pending approval`);
   });
 
@@ -256,10 +315,21 @@ vault.command("approve")
   .description("Sign approval for an exact asset digest")
   .argument("<asset>", "asset name")
   .requiredOption("--vault <name>", "connected vault")
-  .requiredOption("--reviewer <identity>", "reviewer identity from vault policy")
-  .requiredOption("--key <path>", "SSH private key used to sign")
-  .action(async (asset: string, options: { vault: string; reviewer: string; key: string }) => {
-    const approval = await approveVaultAsset(options.vault, asset, options.reviewer, options.key); console.log(`✔ Approved ${asset}\n  digest: ${approval.digest}\n  reviewer: ${approval.reviewer}`);
+  .option("--reviewer <identity>", "advanced: reviewer identity from vault policy")
+  .option("--key <path>", "advanced: SSH private key used to sign")
+  .action(async (asset: string, options: { vault: string; reviewer?: string; key?: string }) => {
+    if (Boolean(options.reviewer) !== Boolean(options.key)) throw new Error("--reviewer and --key must be used together");
+    if (options.reviewer && options.key) {
+      const approval = await approveVaultAsset(options.vault, asset, options.reviewer, options.key); console.log(`✔ Approved ${asset}\n  digest: ${approval.digest}\n  reviewer: ${approval.reviewer}`); return;
+    }
+    await ensureProfile(); const context = await localApprovalContext(options.vault, asset);
+    let allowSelfApproval = false;
+    if (context.selfPublished) {
+      allowSelfApproval = await confirm({ message: `You published '${asset}' and its audit risk is ${context.risk}. Self-approve this exact digest anyway?`, default: false });
+      if (!allowSelfApproval) { console.log("Approval cancelled."); return; }
+    }
+    const result = await approveWithLocalProfile(options.vault, asset, allowSelfApproval);
+    console.log(`✔ Approved ${asset}\n  digest: ${result.approval.digest}\n  reviewer: local profile${result.selfApproved ? " (owner self-approval)" : ""}`);
   });
 
 vault.command("audit")
@@ -314,6 +384,7 @@ program.command("audit")
     return auditCommand(directory, { json: options.json, failOn: options.failOn as AuditSeverity });
   });
 
-program.parseAsync().catch(() => {
+program.parseAsync().catch((error: unknown) => {
+  console.error(`\n✖ ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 });

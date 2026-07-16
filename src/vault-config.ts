@@ -19,7 +19,7 @@ export async function readVaultConnections(): Promise<VaultConnections> {
 export async function connectVault(name: string, provider: VaultProviderKind, location: string): Promise<VaultConnection> {
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(name)) throw new Error("vault name may contain only letters, numbers, dots, underscores, and hyphens");
   const config = await readVaultConnections();
-  const connection = { name, provider, location, connectedAt: new Date().toISOString() };
+  const connection: VaultConnection = { name, provider, location, connectedAt: new Date().toISOString() };
   config.vaults[name] = connection;
   await fs.ensureDir(getEpxHome());
   await fs.writeJson(getVaultConfigPath(), config, { spaces: 2, mode: 0o600 });
