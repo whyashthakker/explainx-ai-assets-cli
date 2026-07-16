@@ -9,6 +9,7 @@ import { RULE_TARGET_NAMES } from "./rules.js";
 import { addMcpUrl, MCP_TARGETS } from "./mcp.js";
 import { PROMPT_TARGET_NAMES } from "./prompts.js";
 import { AGENT_TARGET_NAMES } from "./agent-assets.js";
+import { installContextPacks, installTemplates } from "./simple-assets.js";
 
 printBanner();
 
@@ -144,6 +145,45 @@ agent.command("add")
     scope: options.global ? "global" : undefined,
     interactive: true
   }));
+
+const instruction = program.command("instruction").alias("instructions").description("Install persistent instructions from GitHub");
+instruction.command("add")
+  .description("Install one or more instruction files")
+  .argument("<owner/repo>", "GitHub repository")
+  .argument("[name]", "instruction name; omit to browse detected instructions")
+  .option("-t, --target <agent...>", "target agent")
+  .option("--codex", "install for Codex")
+  .option("--claude-code", "install for Claude Code")
+  .option("--cursor", "install for Cursor")
+  .option("--all-agents", "install for every supported instruction client")
+  .option("-g, --global", "install globally instead of in the current project")
+  .action((source: string, name: string | undefined, options: { target?: string[]; codex?: boolean; claudeCode?: boolean; cursor?: boolean; allAgents?: boolean; global?: boolean }) => addCommand(source, {
+    ruleAsset: true,
+    rule: name,
+    targets: [...(options.allAgents ? RULE_TARGET_NAMES : []), ...(options.target ?? []), ...(options.codex ? ["codex"] : []), ...(options.claudeCode ? ["claude-code"] : []), ...(options.cursor ? ["cursor"] : [])],
+    scope: options.global ? "global" : undefined,
+    interactive: true
+  }));
+
+const template = program.command("template").description("Install project templates from GitHub");
+template.command("add")
+  .description("Copy a template into the current project without overwriting files")
+  .argument("<owner/repo>", "GitHub repository")
+  .argument("[name]", "template name; omit to browse templates")
+  .action(async (source: string, name?: string) => {
+    const installed = await installTemplates(source, name);
+    console.log(installed.length ? `✔ Installed template${installed.length === 1 ? "" : "s"}: ${installed.join(", ")}` : "Installation cancelled.");
+  });
+
+const context = program.command("context").description("Install agent context and knowledge packs from GitHub");
+context.command("add")
+  .description("Install context and link it from agent instruction files")
+  .argument("<owner/repo>", "GitHub repository")
+  .argument("[name]", "context pack name; omit to browse packs")
+  .action(async (source: string, name?: string) => {
+    const installed = await installContextPacks(source, name);
+    console.log(installed.length ? `✔ Installed context pack${installed.length === 1 ? "" : "s"}: ${installed.join(", ")}` : "Installation cancelled.");
+  });
 
 const mcp = program.command("mcp").description("Install and manage Model Context Protocol servers");
 mcp.command("add")

@@ -27,6 +27,9 @@ epx audit
 epx audit react-review
 epx mcp add https://mcp.upstox.com/mcp
 epx agent add github/awesome-copilot
+epx instruction add owner/repo
+epx template add owner/repo
+epx context add owner/repo
 epx mcp add https://mcp.upstox.com/mcp --codex --claude-code --cursor
 ```
 
@@ -81,6 +84,31 @@ epx agent add owner/repo security-reviewer --all-agents
 ```
 
 EPX detects agents recursively under `agents/`, `.github/agents/`, `.claude/agents/`, and `.gemini/agents/`. Omitting the name opens the searchable multi-select picker. The first release targets Claude Code, GitHub Copilot, and Gemini CLI. EPX preserves the agent instructions and description but deliberately removes source-specific tool and model declarations during conversion so installing an agent cannot silently broaden permissions on another client.
+
+### Instructions, templates, and context packs
+
+Install persistent instructions without colliding with skill or prompt detection:
+
+```bash
+epx instruction add owner/repo
+epx instruction add owner/repo security --all-agents
+```
+
+Instruction discovery supports `instructions/`, `rules/`, `.github/instructions/`, `.cursor/rules/`, `.claude/rules/`, root `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.github/copilot-instructions.md`. It uses the same native conversion and managed-file behavior as universal rules.
+
+Template repositories use `templates/<name>/`. EPX copies the selected template into the current directory and refuses the entire installation if any destination file already exists:
+
+```bash
+epx template add owner/repo
+epx template add owner/repo nextjs
+```
+
+Context repositories use `contexts/<name>/`, `context/<name>/`, or `knowledge/<name>/`. EPX stores packs under `.agents/context/<name>/` and adds idempotent managed references to the selected `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` files:
+
+```bash
+epx context add owner/repo
+epx context add owner/repo architecture
+```
 
 ### MCP servers
 

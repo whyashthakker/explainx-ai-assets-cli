@@ -18,6 +18,7 @@ export interface InstallOptions {
   skill?: string;
   rule?: string;
   rules?: string[];
+  ruleAsset?: boolean;
   command?: string;
   prompt?: string;
   promptAssets?: string[];
@@ -118,6 +119,7 @@ async function findConventionalPrompts(root: string, source: string, type: "comm
 
 const RULE_DIRECTORIES = [
   "rules",
+  "instructions",
   ".cursor/rules",
   ".claude/rules",
   ".github/instructions",
@@ -149,7 +151,7 @@ async function findConventionalRule(root: string, source: string, requestedRule?
         if ((await fs.stat(fullPath)).isFile() && /\.(md|mdc)$/i.test(file)) files.push(fullPath);
       }
     }
-    for (const file of [".cursorrules", "AGENTS.md", "CLAUDE.md", "GEMINI.md"]) {
+    for (const file of [".cursorrules", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md"]) {
       const candidate = path.join(contentRoot, file);
       if (await fs.pathExists(candidate)) files.push(candidate);
     }
@@ -250,7 +252,7 @@ export async function installPackage(
         const conventional = await findConventionalPrompts(temporary, source, type, options.command ?? options.prompt, options.promptAssets);
         validation = { manifest: conventional.manifest, assetDirectories: [`${type}s`] };
         conventionalPromptFiles = conventional.files;
-      } else if (options.rule) {
+      } else if (options.ruleAsset || options.rule) {
         const conventional = await findConventionalRule(temporary, source, options.rule, options.rules);
         validation = { manifest: conventional.manifest, assetDirectories: ["rules"] };
         conventionalRuleFiles = conventional.files;

@@ -53,6 +53,7 @@ export interface AddOptions {
   projectDirectory?: string;
   skill?: string;
   rule?: string;
+  ruleAsset?: boolean;
   command?: string;
   prompt?: string;
   agent?: string;
@@ -68,7 +69,7 @@ export async function addCommand(source: string, options: AddOptions = {}): Prom
     };
     let installed;
     try {
-      installed = await installPackage(source, undefined, hooks, { assetType: options.assetType, skill: options.skill, rule: options.rule, command: options.command, prompt: options.prompt, agent: options.agent, agentAsset: options.agentAsset });
+      installed = await installPackage(source, undefined, hooks, { assetType: options.assetType, skill: options.skill, rule: options.rule, ruleAsset: options.ruleAsset, command: options.command, prompt: options.prompt, agent: options.agent, agentAsset: options.agentAsset });
     } catch (error) {
       if (!(error instanceof RuleSelectionRequiredError || error instanceof PromptSelectionRequiredError || error instanceof AgentSelectionRequiredError) || !options.interactive || !process.stdin.isTTY) throw error;
       spinner.stop();
