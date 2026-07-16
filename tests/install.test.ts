@@ -104,4 +104,15 @@ describe("installPackage", () => {
       rules: ["clean-code", "fastapi"]
     });
   });
+
+  it("installs a conventional GitHub Copilot prompt", async () => {
+    const zip = new AdmZip();
+    zip.addFile("prompts-main/.github/prompts/review.prompt.md", Buffer.from("---\ndescription: Review code\n---\nReview the current changes."));
+    nock("https://github.com").get("/owner/prompts/archive/HEAD.zip").reply(200, zip.toBuffer());
+
+    const installed = await installPackage("owner/prompts");
+
+    expect(installed).toMatchObject({ name: "review", type: "prompt" });
+    await expect(fs.readFile(path.join(getPackagesDirectory(), "review", "prompts", "review.md"), "utf8")).resolves.toContain("Review the current changes");
+  });
 });

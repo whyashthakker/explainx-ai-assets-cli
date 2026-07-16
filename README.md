@@ -17,6 +17,8 @@ epx add anthropics/skills --skill frontend-design --all-agents
 epx add owner/ai-rules --rule typescript
 epx add owner/ai-rules --rule typescript --codex --claude-code --cursor
 epx add owner/ai-rules --rule typescript --all-agents
+epx prompt add microsoft/vscode find-duplicates
+epx cmd add iannuttall/claude-sessions session-help --codex --claude-code --cursor
 epx list
 epx update
 epx remove react-review
@@ -55,6 +57,17 @@ EPX discovers conventional rules from `rules/`, `.cursor/rules/`, `.claude/rules
 EPX keeps the downloaded canonical rule under `~/.epx/packages/<name>/rules` and generates the native target format. For example, Cursor receives `.cursor/rules/<name>.mdc`, Claude Code receives `.claude/rules/<name>.md`, Copilot receives `.github/instructions/<name>.instructions.md`, and Codex receives an idempotent EPX-managed section in `AGENTS.md`. Existing content outside an EPX-managed section is preserved.
 
 Installed packages and the local registry live in `~/.epx`. Set `EPX_HOME` to use another location.
+
+### Commands and prompts
+
+Install reusable commands or prompts from GitHub:
+
+```bash
+epx cmd add owner/repo create-pr
+epx prompt add owner/repo code-review
+```
+
+Use the separate `epx cmd add` and `epx prompt add` namespaces so repositories containing several kinds of AI assets are never misclassified. When a repository contains multiple commands or prompts and no name is supplied, EPX opens the searchable multi-select picker. Selected assets can be installed for Codex, Claude Code, Cursor, GitHub Copilot, and Gemini CLI. EPX detects `commands/`, `prompts/`, `.claude/commands/`, `.cursor/commands/`, `.gemini/commands/`, `.github/prompts/`, and `.codex/prompts/`. It writes Markdown for Codex, Claude Code, and Cursor, `.prompt.md` for Copilot, and valid command TOML for Gemini CLI.
 
 ### MCP servers
 

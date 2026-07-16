@@ -14,9 +14,13 @@ export interface InstallHooks {
 }
 
 export interface InstallOptions {
+  assetType?: "command" | "prompt";
   skill?: string;
   rule?: string;
   rules?: string[];
+  command?: string;
+  prompt?: string;
+  promptAssets?: string[];
 }
 
 interface ConventionalSkill {
@@ -34,6 +38,42 @@ export class RuleSelectionRequiredError extends Error {
     super(`multiple rules found; select one or more with --rule <name>`);
     this.name = "RuleSelectionRequiredError";
   }
+}
+
+export class PromptSelectionRequiredError extends Error {
+  constructor(public readonly assets: string[], public readonly assetType: "command" | "prompt") {
+    super(`multiple ${assetType}s found; select one or more`);
+    this.name = "PromptSelectionRequiredError";
+  }
+}
+
+const PROMPT_DIRECTORIES = {
+  command: ["commands", ".claude/commands", ".cursor/commands", ".gemini/commands"],
+  prompt: ["prompts", ".github/prompts", ".codex/prompts"]
+};
+
+async function findConventionalPrompts(root: string, source: string, type: "command" | "prompt", requested?: string, requestedMany?: string[]) {
+  const files: string[] = [];
+  const roots = [root, ...(await fs.readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => path.join(root, entry.name))];
+  for (const contentRoot of roots) for (const directory of PROMPT_DIRECTORIES[type]) {
+    const candidate = path.join(contentRoot, directory);
+    if (!(await fs.pathExists(candidate)) || !(await fs.stat(candidate)).isDirectory()) continue;
+    for (const file of await fs.readdir(candidate)) {
+      const full = path.join(candidate, file);
+      if ((await fs.stat(full)).isFile() && /\.(md|toml)$/i.test(file)) files.push(full);
+    }
+  }
+  const unique = [...new Set(files)];
+  if (unique.length === 0) throw new Error(`no conventional ${type} files were discovered`);
+  const assetName = (file: string) => path.basename(file).replace(/\.prompt\.md$/i, "").replace(/\.(md|toml)$/i, "");
+  const wanted = requestedMany ?? (requested ? [requested] : []);
+  if (wanted.length === 0 && unique.length > 1) throw new PromptSelectionRequiredError(unique.map(assetName), type);
+  const selected = wanted.length ? wanted.map((name) => unique.find((file) => assetName(file).toLowerCase() === name.toLowerCase())) : [unique[0]];
+  const missing = selected.findIndex((file) => !file);
+  if (missing >= 0) throw new Error(`${type} '${wanted[missing]}' was not found`);
+  const selectedFiles = selected as string[];
+  const name = (selectedFiles.length === 1 ? assetName(selectedFiles[0]) : source.split("/").at(-1) ?? `${type}s`).toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+  return { files: selectedFiles, manifest: { name, version: "0.0.0", type, description: `${type} installed from ${source}` } as Manifest };
 }
 
 const RULE_DIRECTORIES = [
@@ -154,12 +194,18 @@ export async function installPackage(
     let manifestPath: string | undefined;
     let conventionalSkillDirectory: string | undefined;
     let conventionalRuleFiles: string[] | undefined;
+    let conventionalPromptFiles: string[] | undefined;
     try {
       validation = await validatePackage(temporary);
       manifestPath = await findManifest(temporary);
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes("epx.yaml was not found")) throw error;
-      if (options.rule) {
+      if (options.assetType || options.command || options.prompt || options.promptAssets) {
+        const type = options.assetType ?? (options.prompt ? "prompt" : "command");
+        const conventional = await findConventionalPrompts(temporary, source, type, options.command ?? options.prompt, options.promptAssets);
+        validation = { manifest: conventional.manifest, assetDirectories: [`${type}s`] };
+        conventionalPromptFiles = conventional.files;
+      } else if (options.rule) {
         const conventional = await findConventionalRule(temporary, source, options.rule, options.rules);
         validation = { manifest: conventional.manifest, assetDirectories: ["rules"] };
         conventionalRuleFiles = conventional.files;
@@ -178,7 +224,21 @@ export async function installPackage(
             if (ruleError instanceof Error && !ruleError.message.includes("no conventional rule files were discovered")) {
               throw ruleError;
             }
-            throw skillError;
+            try {
+              const conventional = await findConventionalPrompts(temporary, source, "command");
+              validation = { manifest: conventional.manifest, assetDirectories: ["commands"] };
+              conventionalPromptFiles = conventional.files;
+            } catch (commandError) {
+              if (commandError instanceof PromptSelectionRequiredError) throw commandError;
+              try {
+                const conventional = await findConventionalPrompts(temporary, source, "prompt");
+                validation = { manifest: conventional.manifest, assetDirectories: ["prompts"] };
+                conventionalPromptFiles = conventional.files;
+              } catch (promptError) {
+                if (promptError instanceof PromptSelectionRequiredError) throw promptError;
+                throw skillError;
+              }
+            }
           }
         }
       }
@@ -197,6 +257,12 @@ export async function installPackage(
         await fs.ensureDir(path.join(staging, directory));
         for (const file of conventionalRuleFiles) {
           await fs.copy(file, path.join(staging, directory, `${ruleName(file)}.md`));
+        }
+      } else if ((directory === "commands" || directory === "prompts") && conventionalPromptFiles) {
+        await fs.ensureDir(path.join(staging, directory));
+        for (const file of conventionalPromptFiles) {
+          const name = path.basename(file).replace(/\.prompt\.md$/i, "").replace(/\.(md|toml)$/i, "");
+          await fs.copy(file, path.join(staging, directory, `${name}${path.extname(file)}`));
         }
       } else {
         const sourceDirectory = directory === "skills" && conventionalSkillDirectory

@@ -5,12 +5,13 @@ import ora from "ora";
 import semver from "semver";
 import { getPackagesDirectory } from "./config.js";
 import { getLatestRef } from "./github.js";
-import { installPackage, RuleSelectionRequiredError } from "./install.js";
+import { installPackage, PromptSelectionRequiredError, RuleSelectionRequiredError } from "./install.js";
 import { validatePackage } from "./manifest.js";
 import { readRegistry, writeRegistry } from "./registry.js";
 import { auditPackage, severityWeight, type AuditSeverity } from "./audit.js";
 import { AGENTS, installToAgents, isAgentName, promptForAgentInstall, type AgentInstallSelection, type AgentName, type InstallScope } from "./agents.js";
 import { installRuleToAgents, promptForRuleInstall, promptForRules, supportsRules } from "./rules.js";
+import { installPrompts, promptForPromptAssets, promptForPromptTargets, supportsPromptTarget } from "./prompts.js";
 
 export interface AuditOptions { json?: boolean; failOn?: AuditSeverity }
 
@@ -44,12 +45,15 @@ export async function auditCommand(target = process.cwd(), options: AuditOptions
 }
 
 export interface AddOptions {
+  assetType?: "command" | "prompt";
   targets?: string[];
   scope?: InstallScope;
   interactive?: boolean;
   projectDirectory?: string;
   skill?: string;
   rule?: string;
+  command?: string;
+  prompt?: string;
 }
 
 export async function addCommand(source: string, options: AddOptions = {}): Promise<void> {
@@ -61,17 +65,17 @@ export async function addCommand(source: string, options: AddOptions = {}): Prom
     };
     let installed;
     try {
-      installed = await installPackage(source, undefined, hooks, { skill: options.skill, rule: options.rule });
+      installed = await installPackage(source, undefined, hooks, { assetType: options.assetType, skill: options.skill, rule: options.rule, command: options.command, prompt: options.prompt });
     } catch (error) {
-      if (!(error instanceof RuleSelectionRequiredError) || !options.interactive || !process.stdin.isTTY) throw error;
+      if (!(error instanceof RuleSelectionRequiredError || error instanceof PromptSelectionRequiredError) || !options.interactive || !process.stdin.isTTY) throw error;
       spinner.stop();
-      const rules = await promptForRules(error.rules);
-      if (rules === null || rules.length === 0) {
+      const assets = error instanceof RuleSelectionRequiredError ? await promptForRules(error.rules) : await promptForPromptAssets(error.assets, error.assetType);
+      if (assets === null || assets.length === 0) {
         console.log(chalk.yellow("Installation cancelled."));
         return;
       }
       spinner.start(`Downloading ${source}`);
-      installed = await installPackage(source, undefined, hooks, { rules });
+      installed = await installPackage(source, undefined, hooks, error instanceof RuleSelectionRequiredError ? { rules: assets } : { promptAssets: assets, command: error.assetType === "command" ? assets[0] : undefined, prompt: error.assetType === "prompt" ? assets[0] : undefined });
     }
     spinner.succeed(`Downloaded and validated ${chalk.cyan(installed.name)} ${chalk.dim(`v${installed.version}`)}`);
 
@@ -88,9 +92,13 @@ export async function addCommand(source: string, options: AddOptions = {}): Prom
       const unsupported = requestedTargets.find((target) => !supportsRules(target));
       throw new Error(`${AGENTS[unsupported!].label} does not have a supported rule adapter`);
     }
+    if ((installed.type === "command" || installed.type === "prompt") && requestedTargets.some((target) => !supportsPromptTarget(target))) {
+      const unsupported = requestedTargets.find((target) => !supportsPromptTarget(target));
+      throw new Error(`${AGENTS[unsupported!].label} does not have a supported command/prompt adapter`);
+    }
     if (!selection && options.interactive && process.stdin.isTTY) {
-      selection = installed.type === "rule"
-        ? await promptForRuleInstall(installed.name)
+      selection = installed.type === "rule" ? await promptForRuleInstall(installed.name)
+        : installed.type === "command" || installed.type === "prompt" ? await promptForPromptTargets(installed.name)
         : await promptForAgentInstall(installed.name);
     }
 
@@ -109,8 +117,8 @@ export async function addCommand(source: string, options: AddOptions = {}): Prom
       return;
     }
 
-    const destinations = installed.type === "rule"
-      ? await installRuleToAgents(installed, selection, options.projectDirectory)
+    const destinations = installed.type === "rule" ? await installRuleToAgents(installed, selection, options.projectDirectory)
+      : installed.type === "command" || installed.type === "prompt" ? await installPrompts(installed, selection, options.projectDirectory)
       : await installToAgents(installed, selection, options.projectDirectory);
     console.log(`\n${chalk.green("✔")} Installed ${chalk.cyan(installed.name)} for ${selection.agents.map((name) => AGENTS[name].label).join(", ")}`);
     for (const destination of destinations) console.log(chalk.dim(`  → ${destination}`));
