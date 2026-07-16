@@ -23,6 +23,8 @@ epx remove react-review
 epx validate
 epx audit
 epx audit react-review
+epx mcp add https://mcp.upstox.com/mcp
+epx mcp add https://mcp.upstox.com/mcp --codex --claude-code --cursor
 ```
 
 Running `epx add <owner/repo>` in a terminal opens an interactive agent and scope picker. Universal agents always share `.agents/skills`. Type to search additional agents, use the arrow keys to move, Space to select, Ctrl+A to select all, Enter to confirm, and Escape to cancel cleanly. Pass `--codex`, `--claude-code`, `--cursor`, `--target <agent...>`, or `--all-agents` to skip the agent picker. Add `--global` for a user-wide installation; otherwise assets are installed in the current project.
@@ -53,6 +55,24 @@ EPX discovers conventional rules from `rules/`, `.cursor/rules/`, `.claude/rules
 EPX keeps the downloaded canonical rule under `~/.epx/packages/<name>/rules` and generates the native target format. For example, Cursor receives `.cursor/rules/<name>.mdc`, Claude Code receives `.claude/rules/<name>.md`, Copilot receives `.github/instructions/<name>.instructions.md`, and Codex receives an idempotent EPX-managed section in `AGENTS.md`. Existing content outside an EPX-managed section is preserved.
 
 Installed packages and the local registry live in `~/.epx`. Set `EPX_HOME` to use another location.
+
+### MCP servers
+
+Install a remote Streamable HTTP or SSE MCP URL and select the clients that should receive it:
+
+```bash
+epx mcp add https://mcp.upstox.com/mcp
+```
+
+Use the searchable picker or skip it with flags:
+
+```bash
+epx mcp add https://mcp.upstox.com/mcp --codex --claude-code --cursor
+epx mcp add https://mcp.upstox.com/mcp --all-agents
+epx mcp add https://example.com/mcp --name example
+```
+
+EPX installs MCP servers globally and merges them without deleting existing settings. User-level installations target `~/.codex/config.toml`, `~/.claude.json`, `~/.cursor/mcp.json`, `~/.gemini/settings.json`, and VS Code's platform-specific user `mcp.json` for Codex, Claude Code, Cursor, Gemini CLI, and GitHub Copilot respectively. Restart the selected client after installation so it reloads its MCP configuration. Remote OAuth is completed by the selected client when it first connects; EPX does not collect or store OAuth tokens.
 
 ## Package format
 

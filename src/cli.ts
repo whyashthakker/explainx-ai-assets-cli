@@ -6,6 +6,7 @@ import type { AuditSeverity } from "./audit.js";
 import { ADDITIONAL_AGENT_NAMES, AGENTS, type AgentName, type InstallScope } from "./agents.js";
 import { printBanner } from "./banner.js";
 import { RULE_TARGET_NAMES } from "./rules.js";
+import { addMcpUrl, MCP_TARGETS } from "./mcp.js";
 
 printBanner();
 
@@ -58,6 +59,34 @@ program.command("list")
   .alias("ls")
   .description("List installed AI assets")
   .action(listCommand);
+
+const mcp = program.command("mcp").description("Install and manage Model Context Protocol servers");
+mcp.command("add")
+  .description("Install a remote MCP server URL for one or more AI agents")
+  .argument("<url>", "Streamable HTTP or SSE MCP server URL")
+  .option("-n, --name <name>", "server name (defaults to the URL hostname)")
+  .option("-t, --target <agent...>", "target MCP client")
+  .option("--codex", "install for Codex")
+  .option("--claude-code", "install for Claude Code")
+  .option("--cursor", "install for Cursor")
+  .option("--gemini", "install for Gemini CLI")
+  .option("--copilot", "install for GitHub Copilot")
+  .option("--all-agents", "install for every supported MCP client")
+  .action(async (url: string, options: { name?: string; target?: string[]; codex?: boolean; claudeCode?: boolean; cursor?: boolean; gemini?: boolean; copilot?: boolean; allAgents?: boolean }) => {
+    const targets = [
+      ...(options.allAgents ? Object.keys(MCP_TARGETS) : []),
+      ...(options.target ?? []),
+      ...(options.codex ? ["codex"] : []),
+      ...(options.claudeCode ? ["claude-code"] : []),
+      ...(options.cursor ? ["cursor"] : []),
+      ...(options.gemini ? ["gemini-cli"] : []),
+      ...(options.copilot ? ["github-copilot"] : [])
+    ];
+    const destinations = await addMcpUrl(url, { name: options.name, targets, scope: "global", interactive: true });
+    if (destinations.length === 0) { console.log("Installation cancelled."); return; }
+    console.log(`\n✔ Installed MCP server in ${destinations.length} configuration${destinations.length === 1 ? "" : "s"}`);
+    for (const destination of destinations) console.log(`  → ${destination}`);
+  });
 
 program.command("remove")
   .alias("rm")
