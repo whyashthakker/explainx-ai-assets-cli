@@ -115,4 +115,13 @@ describe("installPackage", () => {
     expect(installed).toMatchObject({ name: "review", type: "prompt" });
     await expect(fs.readFile(path.join(getPackagesDirectory(), "review", "prompts", "review.md"), "utf8")).resolves.toContain("Review the current changes");
   });
+
+  it("installs a conventional custom agent", async () => {
+    const zip = new AdmZip();
+    zip.addFile("agents-main/.github/agents/reviewer.agent.md", Buffer.from("---\ndescription: Reviews code\n---\nReview carefully."));
+    nock("https://github.com").get("/owner/agents/archive/HEAD.zip").reply(200, zip.toBuffer());
+    const installed = await installPackage("owner/agents", undefined, {}, { agentAsset: true, agent: "reviewer" });
+    expect(installed).toMatchObject({ name: "reviewer", type: "agent" });
+    await expect(fs.readFile(path.join(getPackagesDirectory(), "reviewer", "agents", "reviewer.md"), "utf8")).resolves.toContain("Review carefully");
+  });
 });

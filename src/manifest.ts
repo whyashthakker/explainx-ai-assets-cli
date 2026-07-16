@@ -7,7 +7,7 @@ import { ASSET_DIRECTORIES } from "./types.js";
 export const manifestSchema = z.object({
   name: z.string().min(1).regex(/^[a-z0-9][a-z0-9._-]*$/, "must use lowercase letters, numbers, dots, underscores, or hyphens"),
   version: z.string().regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, "must be a semantic version"),
-  type: z.enum(["skill", "rule", "command", "prompt"]),
+  type: z.enum(["skill", "rule", "command", "prompt", "agent"]),
   description: z.string().min(1).optional(),
   targets: z.array(z.string().min(1)).min(1).optional()
 }).strict();

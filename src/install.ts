@@ -21,6 +21,9 @@ export interface InstallOptions {
   command?: string;
   prompt?: string;
   promptAssets?: string[];
+  agent?: string;
+  agents?: string[];
+  agentAsset?: boolean;
 }
 
 interface ConventionalSkill {
@@ -45,6 +48,43 @@ export class PromptSelectionRequiredError extends Error {
     super(`multiple ${assetType}s found; select one or more`);
     this.name = "PromptSelectionRequiredError";
   }
+}
+
+export class AgentSelectionRequiredError extends Error {
+  constructor(public readonly agents: string[]) {
+    super("multiple agents found; select one or more");
+    this.name = "AgentSelectionRequiredError";
+  }
+}
+
+async function walkMarkdown(directory: string): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await walkMarkdown(full));
+    else if (/\.(agent\.)?md$/i.test(entry.name)) files.push(full);
+  }
+  return files;
+}
+
+async function findConventionalAgents(root: string, source: string, requested?: string, requestedMany?: string[]) {
+  const files: string[] = [];
+  const roots = [root, ...(await fs.readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => path.join(root, entry.name))];
+  for (const contentRoot of roots) for (const directory of ["agents", ".github/agents", ".claude/agents", ".gemini/agents"]) {
+    const candidate = path.join(contentRoot, directory);
+    if (await fs.pathExists(candidate) && (await fs.stat(candidate)).isDirectory()) files.push(...await walkMarkdown(candidate));
+  }
+  const unique = [...new Set(files)];
+  if (!unique.length) throw new Error("no conventional agent files were discovered");
+  const agentName = (file: string) => path.basename(file).replace(/\.agent\.md$/i, "").replace(/\.md$/i, "");
+  const wanted = requestedMany ?? (requested ? [requested] : []);
+  if (!wanted.length && unique.length > 1) throw new AgentSelectionRequiredError(unique.map(agentName));
+  const selected = wanted.length ? wanted.map((name) => unique.find((file) => agentName(file).toLowerCase() === name.toLowerCase())) : [unique[0]];
+  const missing = selected.findIndex((file) => !file);
+  if (missing >= 0) throw new Error(`agent '${wanted[missing]}' was not found`);
+  const selectedFiles = selected as string[];
+  const name = (selectedFiles.length === 1 ? agentName(selectedFiles[0]) : source.split("/").at(-1) ?? "agents").toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+  return { files: selectedFiles, manifest: { name, version: "0.0.0", type: "agent", description: `Agent installed from ${source}` } as Manifest };
 }
 
 const PROMPT_DIRECTORIES = {
@@ -195,12 +235,17 @@ export async function installPackage(
     let conventionalSkillDirectory: string | undefined;
     let conventionalRuleFiles: string[] | undefined;
     let conventionalPromptFiles: string[] | undefined;
+    let conventionalAgentFiles: string[] | undefined;
     try {
       validation = await validatePackage(temporary);
       manifestPath = await findManifest(temporary);
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes("epx.yaml was not found")) throw error;
-      if (options.assetType || options.command || options.prompt || options.promptAssets) {
+      if (options.agentAsset || options.agent || options.agents) {
+        const conventional = await findConventionalAgents(temporary, source, options.agent, options.agents);
+        validation = { manifest: conventional.manifest, assetDirectories: ["agents"] };
+        conventionalAgentFiles = conventional.files;
+      } else if (options.assetType || options.command || options.prompt || options.promptAssets) {
         const type = options.assetType ?? (options.prompt ? "prompt" : "command");
         const conventional = await findConventionalPrompts(temporary, source, type, options.command ?? options.prompt, options.promptAssets);
         validation = { manifest: conventional.manifest, assetDirectories: [`${type}s`] };
@@ -257,6 +302,12 @@ export async function installPackage(
         await fs.ensureDir(path.join(staging, directory));
         for (const file of conventionalRuleFiles) {
           await fs.copy(file, path.join(staging, directory, `${ruleName(file)}.md`));
+        }
+      } else if (directory === "agents" && conventionalAgentFiles) {
+        await fs.ensureDir(path.join(staging, directory));
+        for (const file of conventionalAgentFiles) {
+          const name = path.basename(file).replace(/\.agent\.md$/i, "").replace(/\.md$/i, "");
+          await fs.copy(file, path.join(staging, directory, `${name}.md`));
         }
       } else if ((directory === "commands" || directory === "prompts") && conventionalPromptFiles) {
         await fs.ensureDir(path.join(staging, directory));

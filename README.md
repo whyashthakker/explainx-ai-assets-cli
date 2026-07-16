@@ -26,6 +26,7 @@ epx validate
 epx audit
 epx audit react-review
 epx mcp add https://mcp.upstox.com/mcp
+epx agent add github/awesome-copilot
 epx mcp add https://mcp.upstox.com/mcp --codex --claude-code --cursor
 ```
 
@@ -68,6 +69,18 @@ epx prompt add owner/repo code-review
 ```
 
 Use the separate `epx cmd add` and `epx prompt add` namespaces so repositories containing several kinds of AI assets are never misclassified. When a repository contains multiple commands or prompts and no name is supplied, EPX opens the searchable multi-select picker. Selected assets can be installed for Codex, Claude Code, Cursor, GitHub Copilot, and Gemini CLI. EPX detects `commands/`, `prompts/`, `.claude/commands/`, `.cursor/commands/`, `.gemini/commands/`, `.github/prompts/`, and `.codex/prompts/`. It writes Markdown for Codex, Claude Code, and Cursor, `.prompt.md` for Copilot, and valid command TOML for Gemini CLI.
+
+### Custom agents and subagents
+
+Discover and install custom agents from GitHub:
+
+```bash
+epx agent add github/awesome-copilot
+epx agent add github/awesome-copilot prompt-builder --copilot
+epx agent add owner/repo security-reviewer --all-agents
+```
+
+EPX detects agents recursively under `agents/`, `.github/agents/`, `.claude/agents/`, and `.gemini/agents/`. Omitting the name opens the searchable multi-select picker. The first release targets Claude Code, GitHub Copilot, and Gemini CLI. EPX preserves the agent instructions and description but deliberately removes source-specific tool and model declarations during conversion so installing an agent cannot silently broaden permissions on another client.
 
 ### MCP servers
 

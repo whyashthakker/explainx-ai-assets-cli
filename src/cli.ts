@@ -8,6 +8,7 @@ import { printBanner } from "./banner.js";
 import { RULE_TARGET_NAMES } from "./rules.js";
 import { addMcpUrl, MCP_TARGETS } from "./mcp.js";
 import { PROMPT_TARGET_NAMES } from "./prompts.js";
+import { AGENT_TARGET_NAMES } from "./agent-assets.js";
 
 printBanner();
 
@@ -124,6 +125,25 @@ configurePromptAdd(prompt.command("add").description("Install one or more prompt
 
 const cmd = program.command("cmd").alias("command").description("Install reusable commands from GitHub");
 configurePromptAdd(cmd.command("add").description("Install one or more commands"), "command");
+
+const agent = program.command("agent").description("Install custom agents and subagents from GitHub");
+agent.command("add")
+  .description("Install one or more custom agents")
+  .argument("<owner/repo>", "GitHub repository")
+  .argument("[name]", "agent name; omit to browse detected agents")
+  .option("-t, --target <client...>", "target AI client")
+  .option("--claude-code", "install for Claude Code")
+  .option("--gemini", "install for Gemini CLI")
+  .option("--copilot", "install for GitHub Copilot")
+  .option("--all-agents", "install for every supported custom-agent client")
+  .option("-g, --global", "install globally instead of in the current project")
+  .action((source: string, name: string | undefined, options: { target?: string[]; claudeCode?: boolean; gemini?: boolean; copilot?: boolean; allAgents?: boolean; global?: boolean }) => addCommand(source, {
+    agentAsset: true,
+    agent: name,
+    targets: [...(options.allAgents ? AGENT_TARGET_NAMES : []), ...(options.target ?? []), ...(options.claudeCode ? ["claude-code"] : []), ...(options.gemini ? ["gemini-cli"] : []), ...(options.copilot ? ["github-copilot"] : [])],
+    scope: options.global ? "global" : undefined,
+    interactive: true
+  }));
 
 const mcp = program.command("mcp").description("Install and manage Model Context Protocol servers");
 mcp.command("add")
