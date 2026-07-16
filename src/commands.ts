@@ -5,11 +5,12 @@ import ora from "ora";
 import semver from "semver";
 import { getPackagesDirectory } from "./config.js";
 import { getLatestRef } from "./github.js";
-import { installPackage } from "./install.js";
+import { installPackage, RuleSelectionRequiredError } from "./install.js";
 import { validatePackage } from "./manifest.js";
 import { readRegistry, writeRegistry } from "./registry.js";
 import { auditPackage, severityWeight, type AuditSeverity } from "./audit.js";
 import { AGENTS, installToAgents, isAgentName, promptForAgentInstall, type AgentInstallSelection, type AgentName, type InstallScope } from "./agents.js";
+import { installRuleToAgents, promptForRuleInstall, promptForRules, supportsRules } from "./rules.js";
 
 export interface AuditOptions { json?: boolean; failOn?: AuditSeverity }
 
@@ -48,15 +49,30 @@ export interface AddOptions {
   interactive?: boolean;
   projectDirectory?: string;
   skill?: string;
+  rule?: string;
 }
 
 export async function addCommand(source: string, options: AddOptions = {}): Promise<void> {
   const spinner = ora(`Downloading ${source}`).start();
   try {
-    const installed = await installPackage(source, undefined, {
+    const hooks = {
       downloaded: () => { spinner.succeed("Downloaded"); spinner.start("Validating manifest"); },
       validated: () => { spinner.succeed("Manifest validated"); spinner.start("Installing"); }
-    }, { skill: options.skill });
+    };
+    let installed;
+    try {
+      installed = await installPackage(source, undefined, hooks, { skill: options.skill, rule: options.rule });
+    } catch (error) {
+      if (!(error instanceof RuleSelectionRequiredError) || !options.interactive || !process.stdin.isTTY) throw error;
+      spinner.stop();
+      const rules = await promptForRules(error.rules);
+      if (rules === null || rules.length === 0) {
+        console.log(chalk.yellow("Installation cancelled."));
+        return;
+      }
+      spinner.start(`Downloading ${source}`);
+      installed = await installPackage(source, undefined, hooks, { rules });
+    }
     spinner.succeed(`Downloaded and validated ${chalk.cyan(installed.name)} ${chalk.dim(`v${installed.version}`)}`);
 
     const requestedTargets = [...new Set(options.targets ?? [])];
@@ -68,8 +84,14 @@ export async function addCommand(source: string, options: AddOptions = {}): Prom
     let selection: AgentInstallSelection | null | undefined = requestedTargets.length > 0
       ? { agents: requestedTargets as AgentName[], scope: options.scope ?? "project" as InstallScope }
       : undefined;
+    if (installed.type === "rule" && requestedTargets.some((target) => !supportsRules(target))) {
+      const unsupported = requestedTargets.find((target) => !supportsRules(target));
+      throw new Error(`${AGENTS[unsupported!].label} does not have a supported rule adapter`);
+    }
     if (!selection && options.interactive && process.stdin.isTTY) {
-      selection = await promptForAgentInstall(installed.name);
+      selection = installed.type === "rule"
+        ? await promptForRuleInstall(installed.name)
+        : await promptForAgentInstall(installed.name);
     }
 
     if (selection === null) {
@@ -82,7 +104,14 @@ export async function addCommand(source: string, options: AddOptions = {}): Prom
       return;
     }
 
-    const destinations = await installToAgents(installed, selection, options.projectDirectory);
+    if (selection.agents.length === 0) {
+      console.log(chalk.yellow("Installation cancelled."));
+      return;
+    }
+
+    const destinations = installed.type === "rule"
+      ? await installRuleToAgents(installed, selection, options.projectDirectory)
+      : await installToAgents(installed, selection, options.projectDirectory);
     console.log(`\n${chalk.green("✔")} Installed ${chalk.cyan(installed.name)} for ${selection.agents.map((name) => AGENTS[name].label).join(", ")}`);
     for (const destination of destinations) console.log(chalk.dim(`  → ${destination}`));
   } catch (error) {

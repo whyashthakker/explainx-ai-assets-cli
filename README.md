@@ -14,6 +14,9 @@ epx add whyashthakker/react-review --codex
 epx add whyashthakker/react-review --target codex claude-code
 epx add anthropics/skills --skill frontend-design --codex
 epx add anthropics/skills --skill frontend-design --all-agents
+epx add owner/ai-rules --rule typescript
+epx add owner/ai-rules --rule typescript --codex --claude-code --cursor
+epx add owner/ai-rules --rule typescript --all-agents
 epx list
 epx update
 epx remove react-review
@@ -27,6 +30,27 @@ Running `epx add <owner/repo>` in a terminal opens an interactive agent and scop
 Universal agents—including Codex and Cursor—use `.agents/skills/<name>`. Additional agents use their native directories, such as `.claude/skills/<name>` for Claude Code. The agent registry follows the destinations supported by the Vercel Labs Skills CLI.
 
 Repositories without `epx.yaml` are also supported when they use the conventional `SKILL.md` layout, either at the repository root or under `skills/<name>/SKILL.md`. If several skills are present and none matches the repository name, select one with `--skill <name>`.
+
+### Universal rules
+
+Install one rule from a GitHub repository and use it across multiple AI coding agents:
+
+```bash
+epx add owner/repo --rule typescript
+```
+
+The interactive picker currently supports native rule installation for Codex, Claude Code, Cursor, GitHub Copilot, Gemini CLI, Cline, Roo Code, and Windsurf. Use arrows to move, Space to select, Ctrl+A to select every compatible agent, and Enter to install. Skip the picker with agent flags or `--all-agents`:
+
+At least one target agent must be selected. Confirming with no selected agents cancels the target installation while retaining the audited canonical package in `~/.epx/packages`.
+
+```bash
+epx add owner/repo --rule typescript --codex --cursor
+epx add owner/repo --rule typescript --all-agents
+```
+
+EPX discovers conventional rules from `rules/`, `.cursor/rules/`, `.claude/rules/`, `.github/instructions/`, `.windsurf/rules/`, `.roo/rules/`, and `.clinerules/`, as well as `.cursorrules`, `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`. If a repository contains exactly one rule, `epx add owner/repo` detects it automatically. When several rules exist, EPX opens a searchable rule picker. Use arrows to move, Space to select multiple rules, Ctrl+A to select all, Enter to confirm, or Escape to cancel. Pass `--rule <name>` to install one known rule without opening the rule picker.
+
+EPX keeps the downloaded canonical rule under `~/.epx/packages/<name>/rules` and generates the native target format. For example, Cursor receives `.cursor/rules/<name>.mdc`, Claude Code receives `.claude/rules/<name>.md`, Copilot receives `.github/instructions/<name>.instructions.md`, and Codex receives an idempotent EPX-managed section in `AGENTS.md`. Existing content outside an EPX-managed section is preserved.
 
 Installed packages and the local registry live in `~/.epx`. Set `EPX_HOME` to use another location.
 

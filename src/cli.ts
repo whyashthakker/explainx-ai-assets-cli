@@ -5,6 +5,7 @@ import { addCommand, auditCommand, listCommand, removeCommand, updateCommand, va
 import type { AuditSeverity } from "./audit.js";
 import { ADDITIONAL_AGENT_NAMES, AGENTS, type AgentName, type InstallScope } from "./agents.js";
 import { printBanner } from "./banner.js";
+import { RULE_TARGET_NAMES } from "./rules.js";
 
 printBanner();
 
@@ -19,6 +20,7 @@ program.command("add")
   .description("Install an AI asset from a GitHub repository")
   .argument("<owner/repo>", "GitHub repository")
   .option("-s, --skill <name>", "skill to install when the repository contains multiple skills")
+  .option("-r, --rule <name>", "rule to install from any supported rules layout")
   .option("-t, --target <agent...>", "target agent ID (73 agents supported)")
   .option("--codex", "install for Codex")
   .option("--claude-code", "install for Claude Code")
@@ -33,10 +35,13 @@ program.command("add")
     allAgents?: boolean;
     global?: boolean;
     skill?: string;
+    rule?: string;
   }) => addCommand(source, {
     targets: [
       ...(options.allAgents
-        ? ADDITIONAL_AGENT_NAMES.filter((name) => !options.global || Boolean(AGENTS[name].globalDirectory))
+        ? options.rule
+          ? RULE_TARGET_NAMES
+          : ADDITIONAL_AGENT_NAMES.filter((name) => !options.global || Boolean(AGENTS[name].globalDirectory))
         : []),
       ...(options.target ?? []),
       ...(options.codex ? ["codex" as const] : []),
@@ -45,7 +50,8 @@ program.command("add")
     ],
     scope: options.global ? "global" as InstallScope : undefined,
     interactive: true,
-    skill: options.skill
+    skill: options.skill,
+    rule: options.rule
   }));
 
 program.command("list")

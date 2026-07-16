@@ -22,6 +22,7 @@ export interface SearchableAgentPromptConfig {
   universal: string[];
   choices: SearchableAgentChoice[];
   pageSize?: number;
+  noun?: string;
 }
 
 export const searchableAgentCheckbox = createPrompt<string[] | null, SearchableAgentPromptConfig>((config, done) => {
@@ -100,14 +101,18 @@ export const searchableAgentCheckbox = createPrompt<string[] | null, SearchableA
     ? `${selectionPreview.slice(0, 3).join(", ")} +${selectionPreview.length - 3} more`
     : selectionPreview.join(", ");
 
-  return [
-    `${chalk.green("◇")}  73 agents`,
-    `${chalk.green("◆")}  ${config.message}`,
-    "│",
+  const universalSection = config.universal.length > 0 ? [
     `│  ${chalk.dim("──")} Universal (.agents/skills) ${chalk.dim("── always included ──")}`,
     ...universalPreview.map((line) => `│ ${line}`),
+    "│"
+  ] : [];
+
+  return [
+    `${chalk.green("◇")}  ${config.choices.length + config.universal.length} ${config.noun ?? "agents"}`,
+    `${chalk.green("◆")}  ${config.message}`,
     "│",
-    `│  ${chalk.dim("──")} Additional agents ${chalk.dim("────────────────")}`,
+    ...universalSection,
+    `│  ${chalk.dim("──")} ${config.universal.length > 0 ? "Additional agents" : `Available ${config.noun ?? "agents"}`} ${chalk.dim("────────────────")}`,
     `│  Search: ${query}${chalk.inverse(" ")}`,
     `│  ${chalk.dim("↑↓ move, space select, ctrl+a all, enter confirm, esc cancel")}`,
     "│",

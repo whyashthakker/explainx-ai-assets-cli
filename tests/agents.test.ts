@@ -4,6 +4,7 @@ import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it } from "@jest/globals";
 import { ADDITIONAL_AGENT_NAMES, AGENTS, UNIVERSAL_AGENT_NAMES, getAgentDestination, installToAgents } from "../src/agents.js";
 import { getPackagesDirectory } from "../src/config.js";
+import { installRuleToAgents, supportsRules } from "../src/rules.js";
 
 let home: string;
 let project: string;
@@ -47,5 +48,18 @@ describe("agent installation", () => {
     expect(destinations).toHaveLength(2);
     await expect(fs.readFile(path.join(project, ".agents/skills/demo/SKILL.md"), "utf8")).resolves.toBe("# Demo");
     await expect(fs.readFile(path.join(project, ".claude/skills/demo/SKILL.md"), "utf8")).resolves.toBe("# Demo");
+  });
+
+  it("installs one rule in native formats for multiple agents", async () => {
+    await fs.outputFile(path.join(getPackagesDirectory(), "strict-ts", "rules", "strict-ts.md"), "Use strict TypeScript.");
+    const pkg = { name: "strict-ts", version: "0.0.0", type: "rule" as const, source: "owner/rules", installedAt: new Date(0).toISOString() };
+
+    await installRuleToAgents(pkg, { agents: ["cursor", "github-copilot", "claude-code", "codex"], scope: "project" }, project);
+
+    await expect(fs.readFile(path.join(project, ".cursor/rules/strict-ts.mdc"), "utf8")).resolves.toContain("alwaysApply: true");
+    await expect(fs.readFile(path.join(project, ".github/instructions/strict-ts.instructions.md"), "utf8")).resolves.toContain("applyTo: '**'");
+    await expect(fs.readFile(path.join(project, ".claude/rules/strict-ts.md"), "utf8")).resolves.toBe("Use strict TypeScript.");
+    await expect(fs.readFile(path.join(project, "AGENTS.md"), "utf8")).resolves.toContain("epx:rule:strict-ts:start");
+    expect(supportsRules("cursor")).toBe(true);
   });
 });

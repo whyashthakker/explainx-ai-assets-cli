@@ -79,4 +79,29 @@ describe("installPackage", () => {
     expect(installed.name).toBe("frontend-design");
     await expect(fs.readFile(path.join(getPackagesDirectory(), "frontend-design", "skills", "SKILL.md"), "utf8")).resolves.toBe("# Frontend");
   });
+
+  it("installs a named rule from a conventional Cursor rules repository", async () => {
+    const zip = new AdmZip();
+    zip.addFile("rules-main/.cursor/rules/typescript.mdc", Buffer.from("---\nalwaysApply: true\n---\nUse strict TypeScript."));
+    zip.addFile("rules-main/.cursor/rules/react.mdc", Buffer.from("Use React hooks."));
+    nock("https://github.com").get("/owner/rules/archive/HEAD.zip").reply(200, zip.toBuffer());
+
+    const installed = await installPackage("owner/rules", undefined, {}, { rule: "typescript" });
+
+    expect(installed).toMatchObject({ name: "typescript", type: "rule", version: "0.0.0" });
+    await expect(fs.readFile(path.join(getPackagesDirectory(), "typescript", "rules", "typescript.md"), "utf8"))
+      .resolves.toContain("Use strict TypeScript");
+  });
+
+  it("reports discovered rules instead of a misleading skill error", async () => {
+    const zip = new AdmZip();
+    zip.addFile("rules-main/rules/clean-code.mdc", Buffer.from("Keep code clean."));
+    zip.addFile("rules-main/rules/fastapi.mdc", Buffer.from("Use FastAPI."));
+    nock("https://github.com").get("/owner/rules/archive/HEAD.zip").reply(200, zip.toBuffer());
+
+    await expect(installPackage("owner/rules")).rejects.toMatchObject({
+      message: "multiple rules found; select one or more with --rule <name>",
+      rules: ["clean-code", "fastapi"]
+    });
+  });
 });
