@@ -9,6 +9,7 @@ import { installPackage } from "./install.js";
 import { validatePackage } from "./manifest.js";
 import { readRegistry, writeRegistry } from "./registry.js";
 import { auditPackage, severityWeight, type AuditSeverity } from "./audit.js";
+import { AGENTS, installToAgents, isAgentName, promptForAgentInstall, type AgentInstallSelection, type AgentName, type InstallScope } from "./agents.js";
 
 export interface AuditOptions { json?: boolean; failOn?: AuditSeverity }
 
@@ -32,16 +33,52 @@ export async function auditCommand(directory = process.cwd(), options: AuditOpti
   if (options.failOn && severityWeight[report.summary.highestRisk] >= severityWeight[options.failOn]) process.exitCode = 1;
 }
 
-export async function addCommand(source: string): Promise<void> {
+export interface AddOptions {
+  targets?: string[];
+  scope?: InstallScope;
+  interactive?: boolean;
+  projectDirectory?: string;
+  skill?: string;
+}
+
+export async function addCommand(source: string, options: AddOptions = {}): Promise<void> {
   const spinner = ora(`Downloading ${source}`).start();
   try {
     const installed = await installPackage(source, undefined, {
       downloaded: () => { spinner.succeed("Downloaded"); spinner.start("Validating manifest"); },
       validated: () => { spinner.succeed("Manifest validated"); spinner.start("Installing"); }
-    });
-    spinner.succeed(`Installed ${chalk.cyan(installed.name)} ${chalk.dim(`v${installed.version}`)}`);
+    }, { skill: options.skill });
+    spinner.succeed(`Downloaded and validated ${chalk.cyan(installed.name)} ${chalk.dim(`v${installed.version}`)}`);
+
+    const requestedTargets = [...new Set(options.targets ?? [])];
+    const invalidTargets = requestedTargets.filter((target) => !isAgentName(target));
+    if (invalidTargets.length > 0) {
+      throw new Error(`unknown agent '${invalidTargets[0]}'; choose ${Object.keys(AGENTS).join(", ")}`);
+    }
+
+    let selection: AgentInstallSelection | null | undefined = requestedTargets.length > 0
+      ? { agents: requestedTargets as AgentName[], scope: options.scope ?? "project" as InstallScope }
+      : undefined;
+    if (!selection && options.interactive && process.stdin.isTTY) {
+      selection = await promptForAgentInstall(installed.name);
+    }
+
+    if (selection === null) {
+      console.log(chalk.yellow("Installation cancelled."));
+      return;
+    }
+
+    if (!selection) {
+      console.log(chalk.dim(`Saved package to ${path.join(getPackagesDirectory(), installed.name)}`));
+      return;
+    }
+
+    const destinations = await installToAgents(installed, selection, options.projectDirectory);
+    console.log(`\n${chalk.green("✔")} Installed ${chalk.cyan(installed.name)} for ${selection.agents.map((name) => AGENTS[name].label).join(", ")}`);
+    for (const destination of destinations) console.log(chalk.dim(`  → ${destination}`));
   } catch (error) {
-    spinner.fail(error instanceof Error ? error.message : String(error));
+    if (spinner.isSpinning) spinner.fail(error instanceof Error ? error.message : String(error));
+    else console.error(chalk.red(error instanceof Error ? error.message : String(error)));
     throw error;
   }
 }

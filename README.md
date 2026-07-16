@@ -6,14 +6,26 @@ EPX is an open-source package manager for reusable AI assets. In Phase 1, GitHub
 
 ## Usage
 
+Every EPX command starts with the ExplainX ASCII banner. The banner is written to stderr so structured stdout, including `epx audit --json`, remains pipe-safe.
+
 ```bash
 epx add whyashthakker/react-review
+epx add whyashthakker/react-review --codex
+epx add whyashthakker/react-review --target codex claude-code
+epx add anthropics/skills --skill frontend-design --codex
+epx add anthropics/skills --skill frontend-design --all-agents
 epx list
 epx update
 epx remove react-review
 epx validate
 epx audit
 ```
+
+Running `epx add <owner/repo>` in a terminal opens an interactive agent and scope picker. Universal agents always share `.agents/skills`. Type to search additional agents, use the arrow keys to move, Space to select, Ctrl+A to select all, Enter to confirm, and Escape to cancel cleanly. Pass `--codex`, `--claude-code`, `--cursor`, `--target <agent...>`, or `--all-agents` to skip the agent picker. Add `--global` for a user-wide installation; otherwise assets are installed in the current project.
+
+Universal agents—including Codex and Cursor—use `.agents/skills/<name>`. Additional agents use their native directories, such as `.claude/skills/<name>` for Claude Code. The agent registry follows the destinations supported by the Vercel Labs Skills CLI.
+
+Repositories without `epx.yaml` are also supported when they use the conventional `SKILL.md` layout, either at the repository root or under `skills/<name>/SKILL.md`. If several skills are present and none matches the repository name, select one with `--skill <name>`.
 
 Installed packages and the local registry live in `~/.epx`. Set `EPX_HOME` to use another location.
 

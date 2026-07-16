@@ -2,6 +2,10 @@
 import { Command } from "commander";
 import { addCommand, auditCommand, listCommand, removeCommand, updateCommand, validateCommand } from "./commands.js";
 import type { AuditSeverity } from "./audit.js";
+import { ADDITIONAL_AGENT_NAMES, AGENTS, type AgentName, type InstallScope } from "./agents.js";
+import { printBanner } from "./banner.js";
+
+printBanner();
 
 const program = new Command()
   .name("epx")
@@ -11,7 +15,35 @@ const program = new Command()
 program.command("add")
   .description("Install an AI asset from a GitHub repository")
   .argument("<owner/repo>", "GitHub repository")
-  .action(addCommand);
+  .option("-s, --skill <name>", "skill to install when the repository contains multiple skills")
+  .option("-t, --target <agent...>", "target agent ID (73 agents supported)")
+  .option("--codex", "install for Codex")
+  .option("--claude-code", "install for Claude Code")
+  .option("--cursor", "install for Cursor")
+  .option("--all-agents", "install for every supported agent")
+  .option("-g, --global", "install globally instead of in the current project")
+  .action((source: string, options: {
+    target?: AgentName[];
+    codex?: boolean;
+    claudeCode?: boolean;
+    cursor?: boolean;
+    allAgents?: boolean;
+    global?: boolean;
+    skill?: string;
+  }) => addCommand(source, {
+    targets: [
+      ...(options.allAgents
+        ? ADDITIONAL_AGENT_NAMES.filter((name) => !options.global || Boolean(AGENTS[name].globalDirectory))
+        : []),
+      ...(options.target ?? []),
+      ...(options.codex ? ["codex" as const] : []),
+      ...(options.claudeCode ? ["claude-code" as const] : []),
+      ...(options.cursor ? ["cursor" as const] : [])
+    ],
+    scope: options.global ? "global" as InstallScope : undefined,
+    interactive: true,
+    skill: options.skill
+  }));
 
 program.command("list")
   .alias("ls")

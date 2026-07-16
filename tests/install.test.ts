@@ -53,7 +53,30 @@ describe("installPackage", () => {
     const zip = new AdmZip();
     zip.addFile("bad-main/readme.md", Buffer.from("invalid"));
     nock("https://github.com").get("/owner/bad/archive/HEAD.zip").reply(200, zip.toBuffer());
-    await expect(installPackage("owner/bad")).rejects.toThrow("epx.yaml was not found");
+    await expect(installPackage("owner/bad")).rejects.toThrow("no conventional SKILL.md was discovered");
     expect((await readRegistry()).packages).toEqual({});
+  });
+
+  it("installs a conventional skills/name/SKILL.md repository without epx.yaml", async () => {
+    const zip = new AdmZip();
+    zip.addFile("caveman-main/skills/caveman/SKILL.md", Buffer.from("# Caveman"));
+    nock("https://github.com").get("/JuliusBrussee/caveman/archive/HEAD.zip").reply(200, zip.toBuffer());
+
+    const installed = await installPackage("JuliusBrussee/caveman");
+
+    expect(installed).toMatchObject({ name: "caveman", version: "0.0.0", type: "skill" });
+    await expect(fs.readFile(path.join(getPackagesDirectory(), "caveman", "skills", "SKILL.md"), "utf8")).resolves.toBe("# Caveman");
+  });
+
+  it("selects a named skill from a conventional multi-skill repository", async () => {
+    const zip = new AdmZip();
+    zip.addFile("skills-main/skills/frontend-design/SKILL.md", Buffer.from("# Frontend"));
+    zip.addFile("skills-main/skills/backend-design/SKILL.md", Buffer.from("# Backend"));
+    nock("https://github.com").get("/anthropics/skills/archive/HEAD.zip").reply(200, zip.toBuffer());
+
+    const installed = await installPackage("anthropics/skills", undefined, {}, { skill: "frontend-design" });
+
+    expect(installed.name).toBe("frontend-design");
+    await expect(fs.readFile(path.join(getPackagesDirectory(), "frontend-design", "skills", "SKILL.md"), "utf8")).resolves.toBe("# Frontend");
   });
 });

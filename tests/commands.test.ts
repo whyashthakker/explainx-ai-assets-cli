@@ -70,6 +70,18 @@ describe("registry commands", () => {
     expect((await fs.readJson(path.join(home, "registry.json"))).packages.demo.version).toBe("1.0.0");
   });
 
+  it("adds a package directly to a selected agent", async () => {
+    const project = path.join(home, "project");
+    const zip = new AdmZip();
+    zip.addFile("demo-main/epx.yaml", Buffer.from("name: demo\nversion: 1.0.0\ntype: skill\n"));
+    zip.addFile("demo-main/skills/SKILL.md", Buffer.from("# Demo"));
+    nock("https://github.com").get("/owner/demo/archive/HEAD.zip").reply(200, zip.toBuffer());
+
+    await addCommand("owner/demo", { targets: ["codex"], projectDirectory: project });
+
+    await expect(fs.readFile(path.join(project, ".agents/skills/demo/SKILL.md"), "utf8")).resolves.toBe("# Demo");
+  });
+
   it("updates an installed package to a newer release", async () => {
     await registerPackage({ name: "demo", version: "1.0.0", type: "skill", source: "owner/demo", installedAt: new Date(0).toISOString() });
     const zip = new AdmZip();
