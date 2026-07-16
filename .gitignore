@@ -3,3 +3,6 @@ dist/
 coverage/
 .DS_Store
 *.tgz
+.npmrc
+.npm/
+npm-debug.log*

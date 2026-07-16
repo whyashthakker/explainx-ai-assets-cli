@@ -19,6 +19,7 @@ epx update
 epx remove react-review
 epx validate
 epx audit
+epx audit react-review
 ```
 
 Running `epx add <owner/repo>` in a terminal opens an interactive agent and scope picker. Universal agents always share `.agents/skills`. Type to search additional agents, use the arrow keys to move, Space to select, Ctrl+A to select all, Enter to confirm, and Escape to cancel cleanly. Pass `--codex`, `--claude-code`, `--cursor`, `--target <agent...>`, or `--all-agents` to skip the agent picker. Add `--global` for a user-wide installation; otherwise assets are installed in the current project.
@@ -65,6 +66,7 @@ Audit every Markdown file under `skills/`, `rules/`, and `commands/` using the s
 
 ```bash
 epx audit
+epx audit react-review
 epx audit ./my-package --json
 epx audit --fail-on critical
 ```
@@ -80,6 +82,14 @@ npm test
 ```
 
 The Jest suite uses mocked GitHub responses and isolated temporary EPX homes, so it does not modify `~/.epx` or require live repositories. Run coverage with `npm run test:coverage` and watch mode with `npm run test:watch`.
+
+Publish a verified public release with npm's passkey-compatible client:
+
+```bash
+npm run release
+```
+
+The release script runs type checking, tests, the production build, and a package dry run before publishing. Authentication remains in npm's user-level configuration and is never stored in this repository.
 
 ## License
 

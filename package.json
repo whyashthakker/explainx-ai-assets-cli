@@ -1,6 +1,6 @@
 {
-  "name": "epx",
-  "version": "0.1.0",
+  "name": "@explainx.ai/epx",
+  "version": "0.1.2",
   "description": "ExplainX Package Exchange - install AI assets from GitHub",
   "license": "MIT",
   "type": "module",
@@ -16,7 +16,12 @@
     "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "test:watch": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:coverage": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --coverage",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "release": "bash scripts/publish.sh"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=20.17.0"

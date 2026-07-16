@@ -121,4 +121,24 @@ describe("registry commands", () => {
     await auditCommand(root, { json: true });
     expect(JSON.parse(String(log.mock.calls[0][0])).summary.highestRisk).toBe("safe");
   });
+
+  it("audits an installed package by registry name", async () => {
+    await registerPackage({
+      name: "demo",
+      version: "1.0.0",
+      type: "skill",
+      source: "owner/demo",
+      installedAt: new Date(0).toISOString()
+    });
+    await fs.outputFile(path.join(getPackagesDirectory(), "demo", "skills", "SKILL.md"), "Explain code clearly.");
+    const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await auditCommand("demo");
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("highest risk: safe"));
+  });
+
+  it("rejects an unknown audit package name", async () => {
+    await expect(auditCommand("not-installed")).rejects.toThrow("not an installed package or existing directory");
+  });
 });

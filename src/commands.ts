@@ -13,8 +13,17 @@ import { AGENTS, installToAgents, isAgentName, promptForAgentInstall, type Agent
 
 export interface AuditOptions { json?: boolean; failOn?: AuditSeverity }
 
-export async function auditCommand(directory = process.cwd(), options: AuditOptions = {}): Promise<void> {
-  const report = await auditPackage(directory);
+async function resolveAuditTarget(target: string): Promise<string> {
+  const resolvedPath = path.resolve(target);
+  if (await fs.pathExists(resolvedPath)) return resolvedPath;
+
+  const registry = await readRegistry();
+  if (registry.packages[target]) return path.join(getPackagesDirectory(), target);
+  throw new Error(`'${target}' is not an installed package or existing directory`);
+}
+
+export async function auditCommand(target = process.cwd(), options: AuditOptions = {}): Promise<void> {
+  const report = await auditPackage(await resolveAuditTarget(target));
   if (options.json) {
     console.log(JSON.stringify(report, null, 2));
   } else {

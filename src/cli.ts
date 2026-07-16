@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import { Command } from "commander";
 import { addCommand, auditCommand, listCommand, removeCommand, updateCommand, validateCommand } from "./commands.js";
 import type { AuditSeverity } from "./audit.js";
@@ -7,10 +8,12 @@ import { printBanner } from "./banner.js";
 
 printBanner();
 
+const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+
 const program = new Command()
   .name("epx")
   .description("ExplainX Package Exchange - install AI assets from GitHub")
-  .version("0.1.0");
+  .version(packageJson.version);
 
 program.command("add")
   .description("Install an AI asset from a GitHub repository")
@@ -67,7 +70,7 @@ program.command("validate")
 
 program.command("audit")
   .description("Audit local AI assets for security risk signals")
-  .argument("[directory]", "EPX package directory", process.cwd())
+  .argument("[package-or-directory]", "installed package name or EPX package directory", process.cwd())
   .option("--json", "output the full report as JSON")
   .option("--fail-on <severity>", "exit with code 1 at or above: low, medium, high, critical", "high")
   .action((directory: string, options: { json?: boolean; failOn?: string }) => {
